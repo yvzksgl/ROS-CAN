@@ -8,9 +8,14 @@
 /* Essential Header Files */
 #include    <ros.h>
 #include    <CAN.h>
+#include    <Wire.h>
+#include    <string.h>
+#include    <LiquidCrystal_I2C.h>
+
 #include    <std_msgs/Float32.h>
 #include    <geometry_msgs/Twist.h>
 #include    <geometry_msgs/Vector3.h>
+#include    <rosserial_arduino/Adc.h>
 
 
 /* Preprocessing */
@@ -21,6 +26,24 @@
 #define     MAX_STEERING_ANGLE  35
 #define     MAX_RPM             350
 #define     MAX_REVERSE_RPM    -100
+
+/* LCD */
+#define     ASCII                    48
+#define     LCD_AUTONOMOUS            2
+#define     LCD_SPEED_FIRST           6
+#define     LCD_SPEED_SECOND          7
+#define     LCD_CURRENT_FIRST        11
+#define     LCD_CURRENT_SECOND       13
+#define     LCD_GEAR                  2
+#define     LCD_REGEN                 6
+#define     LCD_BRAKE                10
+#define     LCD_STEERING_FIRST       14
+#define     LCD_STEERING_SECOND      15
+
+/* GEARS */
+#define     NEUTRAL    0
+#define     FORWARD    1
+#define     REVERSE    2
 
 
 /* Function Declerations */
@@ -44,10 +67,12 @@ typedef union {
 } STEER;
 
 
+
 /* CAN variable decleartions */
-unsigned int motor_collector[8];
+unsigned int speed_odom_collector[8];
+int32_t      odom_speed;
 unsigned int steer_collector[8];
-unsigned int index = 0;
+unsigned int odom_index = 0;
 
 CAN_Float motor_odometry;
 CAN_Float steer_odometry;
@@ -56,6 +81,8 @@ CAN_Float current;
 /* speed, steering and condition info */
 CAN_Float rpm;
 STEER     steering_obj;
+int32_t   raw_speed;
+int32_t   raw_steer;
 float     regen;
 int32_t   current_position = 0;
 
@@ -72,18 +99,29 @@ int32_t  const   min_steer_speed  = 4;
 int32_t  const   high_steer_speed = 10;  // delete
 
 
-volatile int32_t speed;                   // speed variable CAN
-int32_t change_value = 0;                 // momentary change in steering angle
+/*  */
+volatile int32_t GEAR = NEUTRAL;
+volatile int32_t steer_speed;                // speed variable CAN
+volatile int32_t brake;
+volatile int32_t change_value = 0;   // momentary change in steering angle
+volatile int32_t AUTONOMOUS = 0;
+volatile int32_t EXTRA;
+int8_t anil = 0;
 
 /* Encoder Buffer Variables */
 int32_t         buffer_index = 0;
 int32_t         buffer[BUFFER_SIZE];
 int32_t         buffer_average = 0;
+int32_t         lcd_buffer_average = 0;
 const int32_t   EncoderPin = A0;
 /**/
 
-/* Debug and Log Topic */
+/* Debug and Log */
 geometry_msgs::Vector3 pot_data;
+
+LiquidCrystal_I2C lcd(0x27, 20, 4);
+char first_row[17]  = {'A','=',' ',' ','V','=',' ',' ',' ','C','=',' ','.',' ',' ',' ','\0'};
+char second_row[17] = {'G','=',' ',' ','R','=',' ',' ','B','=',' ',' ','S','=',' ',' ','\0'};
 
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -93,25 +131,49 @@ geometry_msgs::Vector3 pot_data;
 /*
 *     ROS CALLBACK  
 */
-void RosCallback(const geometry_msgs::Vector3 &mahmut){
-    /* Parsing data from callback data */
-    regen = mahmut.z;
-
-    /******************** Speed Logic ******************/ 
-    if (mahmut.x >= 0)
-        rpm.data = map((long) mahmut.x, 0, 1000, 0, MAX_RPM);    
-    else if (mahmut.x < 0)
-        rpm.data = map((long) mahmut.x, 0, -1000, 0, MAX_REVERSE_RPM);
+void RosCallback(const rosserial_arduino::Adc &mahmut){
+    /* 
+     *  @param mahmut : Adc => Data sent from ROS to CANBUS
+     *  
+     *      * mahmut.adc0 : uint16 => Speed Data
+     *      * mahmut.adc1 : uint16 => Angle Data
+     *      * mahmut.adc2 : uint16 => Regen Data
+     *      * mahmut.adc3 : uint16 => GEAR  Data
+     *      * mahmut.adc4 : uint16 => Light Data
+     *      * mahmut.adc5 : uint16 => SOS   Data
+    */
     
-    if (rpm.data)
-        current.data = 0.9;
-    else
-        current.data = 0.0;
+    raw_speed  = map(mahmut.adc0, 0, 1000, 0, 99);
+    raw_steer  = mahmut.adc1;
+    regen      = mahmut.adc2;
+    GEAR       = mahmut.adc3;
+    AUTONOMOUS = mahmut.adc4;
+    EXTRA      = mahmut.adc5;
+    
+    /******************** Speed Logic ******************/ 
 
-    regen = map((long) mahmut.z, 0, 1000, 0, 100);
-    if (regen > 1) {
-        current.data = regen / 100;
-        rpm.data = 0;
+    
+    switch(GEAR) {
+        case FORWARD:
+            rpm.data = map((long) mahmut.adc0, 0, 1000, 0, MAX_RPM); 
+            current.data = 0.9;
+            break;
+        case REVERSE:
+            rpm.data = map((long) mahmut.adc0, 0, 1000, 0, MAX_REVERSE_RPM);
+            current.data = 0.9;
+            break;
+        case NEUTRAL:
+            rpm.data = 0;
+            current.data = 0;
+            break;    
+    }
+
+
+    if (rpm.data < 2)
+        current.data = 0.0;
+    if (regen > 2) {
+        rpm.data = 0; /* security */
+        current.data = regen / 1000;
     }
         
 
@@ -119,36 +181,36 @@ void RosCallback(const geometry_msgs::Vector3 &mahmut){
     /******************** Steering Logic ******************/ 
     /*  
         to send data from terminal or to read data from ROS
-        desired_pos = mahmut.y
+        desired_pos = mahmut.adc1
 
         to read data from pot add a potansiometer to A1 pin
         desired_pos = direksiyon_pot (A1)
     */
-    desired_pos = mahmut.y;
+    desired_pos = mahmut.adc1;
     change_value = desired_pos - current_position; // get change value
 
     /* Speed Control */
     /*
     if (abs(change_value) < 75)
-        speed = low_steer_speed;
+        steer_speed = low_steer_speed;
     else if (change_value < 350 && change_value > -350)
-        speed = high_steer_speed;
+        steer_speed = high_steer_speed;
     else
-        speed = max_steer_speed;
+        steer_speed = max_steer_speed;
     */
     
-    speed = map(abs(change_value), 0, 1800, min_steer_speed, max_steer_speed);
+    steer_speed = map(abs(change_value), 0, 1800, min_steer_speed, max_steer_speed);
     
     /*
         @steering_obj.data_u16[0]  => steering speed
         @steering_obj.data_u8[2]   => steering 
     */
     if (change_value > 0) {
-        steering_obj.data_u16[0] = speed;
+        steering_obj.data_u16[0] = steer_speed;
         steering_obj.data_u8[2]  = 1;      // steer direction
     }
     else if (change_value < 0) {
-        steering_obj.data_u16[0] = speed;
+        steering_obj.data_u16[0] = steer_speed;
         steering_obj.data_u8[2]  = 0;      // steer direction
     }
     else 
@@ -190,7 +252,7 @@ void RosCallback(const geometry_msgs::Vector3 &mahmut){
 
 /******************** Creating ROS Node ******************/ 
 ros::NodeHandle nh;
-ros::Subscriber<geometry_msgs::Vector3> sub("/seko", &RosCallback);
+ros::Subscriber<rosserial_arduino::Adc> sub("/seko", &RosCallback);
 ros::Publisher pub("pot_topic", &pot_data);
 
 
@@ -260,6 +322,11 @@ void setup(){
     nh.advertise(pub);
     delay(100);
 
+    /* LDC */
+    lcd.init();
+    lcd.init();
+    lcd.backlight();
+    
 CAN_INIT:
     if(1 == CAN.begin(1E6)) {
       ;/* wait */;
@@ -279,28 +346,28 @@ CAN_INIT:
 *   rosrun rosserial_arduino serial_node.py _port:=/dev/ttyXXXn _baud:=57600
 */
 void loop(){
-    /************ CAN Packet Read ************ 
-    if (CAN.parsePacket()) {
-        if (CAN.packetId() == 0x403) {
-            while ( CAN.available() ) {
-                motor_collector[index] = CAN.read();
-                index++;
-            }
-        }
-    }
-    *****************************************/
-
-
+    long start_t = millis();
+    /************ CAN Packet Read ************/ 
+    if (CAN.parsePacket())
+        if (CAN.packetId() == 0x403)
+            while (CAN.available())
+                speed_odom_collector[odom_index++] = CAN.read();
+    
+    odom_index ^= odom_index;
+    
     /****************** Encoder Signal ******************/ 
     pot_signal_raw = analogRead(EncoderPin);
     encoder_degree = map(pot_signal_raw, 0, 1023, 0, 3600);
 
     buffer[buffer_index++] = encoder_degree;
-    buffer_index = (buffer_index > BUFFER_SIZE ? 0 : buffer_index);
     buffer_average = buffer_avg(buffer, BUFFER_SIZE);
+    lcd_buffer_average = map(buffer_average, 0, 3600, 0, 99);
+    buffer_index = (buffer_index > BUFFER_SIZE ? 0 : buffer_index);
 
-    /*  DELETE AFTER MAKING POT RELIABLE */
-    //buffer_average = 1800;
+    /* DRIVING MODE */
+    if (AUTONOMOUS)
+        buffer_average = 1800;
+    
     current_position = buffer_average;
 
     
@@ -310,11 +377,30 @@ void loop(){
     /* pot value */
     pot_data.y = buffer_average;
     /* desired joystick or autonomous steering position */
-    pot_data.z = desired_pos;
+    pot_data.z = regen;
     pub.publish(&pot_data);
+
+    first_row[LCD_AUTONOMOUS]         = AUTONOMOUS + ASCII;
+    first_row[LCD_SPEED_FIRST]        = raw_speed / 10 + ASCII; 
+    first_row[LCD_SPEED_SECOND]       = raw_speed % 10 + ASCII;
+    first_row[LCD_CURRENT_FIRST]      = (int) current.data + ASCII;
+    first_row[LCD_CURRENT_SECOND]     = int(current.data * 10.0)%10 + ASCII;
+    first_row[15] = (anil++ % 2) ? 'x' : '+';  
     
+    second_row[LCD_GEAR]              = (GEAR == 1 ? 'F' : (GEAR == 2 ? 'R' : 'N'));
+    second_row[LCD_REGEN]             = map(regen, 0, 1000, 0, 9) + ASCII;
+    second_row[LCD_BRAKE]             = map(brake, 0, 1000, 0, 9) + ASCII;
+    second_row[LCD_STEERING_FIRST]    = lcd_buffer_average / 10 + ASCII;
+    second_row[LCD_STEERING_SECOND]   = lcd_buffer_average % 10 + ASCII;
+
+    /* This part drop node hertz from ~185 to 17 */
+    lcd.setCursor(0,0);
+    lcd.print(first_row);
+    lcd.setCursor(0,1);
+    lcd.print(second_row);
+    /*  */
+
     nh.spinOnce();
-    delay(2);
 }
 
 
