@@ -19,7 +19,6 @@
 
 
 /* Preprocessing */
-#define     PI                  3.1415
 #define     RADIUS              0.28
 #define     BUFFER_SIZE         32
 #define     GEAR_SCALE          7
@@ -169,9 +168,9 @@ void RosCallback(const rosserial_arduino::Adc &mahmut){
     }
 
 
-    if (rpm.data < 2)
+    if (rpm.data == 0)
         current.data = 0.0;
-    if (regen > 2) {
+    if (regen) {
         rpm.data = 0; /* security */
         current.data = regen / 1000;
     }
