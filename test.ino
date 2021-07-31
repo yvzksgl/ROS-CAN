@@ -82,7 +82,7 @@ CAN_Float rpm;
 STEER     steering_obj;
 int32_t   raw_speed;
 int32_t   raw_steer;
-float     regen;
+float     regen = 0;
 int32_t   current_position = 0;
 
 
@@ -181,7 +181,6 @@ void RosCallback(const rosserial_arduino::Adc &mahmut){
     /*  
         to send data from terminal or to read data from ROS
         desired_pos = mahmut.adc1
-
         to read data from pot add a potansiometer to A1 pin
         desired_pos = direksiyon_pot (A1)
     */
@@ -404,13 +403,11 @@ void loop(){
     second_row[LCD_BRAKE]             = map(brake, 0, 1000, 0, 9) + ASCII;
     second_row[LCD_STEERING_FIRST]    = lcd_buffer_average / 10 + ASCII;
     second_row[LCD_STEERING_SECOND]   = lcd_buffer_average % 10 + ASCII;
-
     "/* This part drop node hertz from ~185 to 17
     lcd.setCursor(0,0);
     lcd.print(first_row);
     lcd.setCursor(0,1);
     lcd.print(second_row);
-
     */
  
     nh.spinOnce();
