@@ -125,21 +125,30 @@ def lidar_data(veri_durak):
     global regen
     global steering_angle
 
-    sol_array = np.array(veri_durak.ranges[280:360])
-    right_array = np.array(veri_durak.ranges[1080:1160])
-    on_array = np.array(veri_durak.ranges[0:20] + np.array(veri_durak.ranges[1419:1439]))
+    sol_x = np.array(veri_durak.ranges[300:360])
+    sol_y = np.array(veri_durak.ranges[240:300])
+    sol_z = np.array(veri_durak.ranges[180:240])
 
+    sag_x = np.array(veri_durak.ranges[1080:1140])
+    sag_y = np.array(veri_durak.ranges[1140:1200])
+    sag_z = np.array(veri_durak.ranges[1200:1260])
+
+    on_array = np.array(np.concatenate((veri_durak.ranges[0:20], np.array(veri_durak.ranges[1419:1439]))))
     on_array[on_array > 25] = 25
+
+    sol_array = (sol_x * 5 + sol_y * 3 + sol_z) / 9
+    right_array = (sag_x * 5 + sag_y * 3 + sag_z) / 9
 
     sol_array[sol_array > 5] = 5
     right_array[right_array > 5] = 5 
 
     distances = {
         'right': np.average(right_array),
-        'on' : np.average(on_array) / 2,
+        'on' : np.average(on_array),
         'left': np.average(sol_array)
     }
     
+
     if TERMINATOR:
         if AUTONOMOUS:
             speed = AUTONOMOUS_SPEED
@@ -235,6 +244,8 @@ def lidar_data(veri_durak):
     yigit.adc4 = int(AUTONOMOUS)
     yigit.adc5 = int(EMERGENCY)
 
+    print("sag uzaklık", np.average(right_array))
+    print("sol uzaklık", np.average(sol_array))
     lcd.publish(yigit)
     arduino.publish(mahmut)
 
