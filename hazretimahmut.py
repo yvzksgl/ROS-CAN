@@ -11,16 +11,32 @@ from std_msgs.msg import Float32
 from rosserial_arduino.msg import Adc
 from itertools import cycle
 
+np.seterr('raise')
+
 #global variables
 speed = 0
 regen = 0
 state = ""
+steering_angle = 1800
 
-AUTONOMOUS_SPEED = 100
+AUTONOMOUS_SPEED = 75 
 
 NEUTRAL = 0
 FORWARD = 1
 REVERSE = 2
+
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
 
 def gen():
     gears = [NEUTRAL, FORWARD, NEUTRAL, REVERSE]    
@@ -30,12 +46,17 @@ def gen():
 gear_generator = gen()
 
 AUTONOMOUS = False
-GEAR = next(gear_generator)
-DIRECTION = True
-LIGHTS = False
-EMERGENCY = False
+GEAR       = next(gear_generator)
+DIRECTION  = True
+LIGHTS     = False
+EMERGENCY  = False
+CURRENT    = 0
 
-CURRENT = 0
+
+YAVIZ = False
+SEKO  = False
+TERMINATOR = False
+
 
 # max_speed
 YUSUF = 100
@@ -102,9 +123,10 @@ class PID(object):
 def lidar_data(veri_durak):
     global speed 
     global regen
+    global steering_angle
 
-    sol_array = np.array(veri_durak.ranges[350:380])
-    right_array = np.array(veri_durak.ranges[1070:1100])
+    sol_array = np.array(veri_durak.ranges[280:360])
+    right_array = np.array(veri_durak.ranges[1080:1160])
     on_array = np.array(veri_durak.ranges[0:20] + np.array(veri_durak.ranges[1419:1439]))
 
     on_array[on_array > 25] = 25
@@ -118,78 +140,102 @@ def lidar_data(veri_durak):
         'left': np.average(sol_array)
     }
     
-    if AUTONOMOUS:
-        #
-        #   CHECK THE DIRECTION
-        #
-        steering_angle = pid_controller.calculate(distances['left'] - distances['right'])
-        angle = (steering_angle + 0.5) * 3600
+    if TERMINATOR:
+        if AUTONOMOUS:
+            speed = AUTONOMOUS_SPEED
+            #
+            #   CHECK THE DIRECTION
+            #
+            steering_angle = pid_controller.calculate(distances['left'] - distances['right'])
+            angle = (steering_angle + 0.5) * 3600
 
-        # doldur
-        mahmut.adc0 = int(AUTONOMOUS_SPEED)
-        mahmut.adc1 = int(angle)
-        mahmut.adc2 = 0
-        mahmut.adc3 = FORWARD
-        mahmut.adc4 = True
-        mahmut.adc5 = 0
+            # doldur
+            mahmut.adc0 = int(speed)
+            mahmut.adc1 = int(angle)
+            mahmut.adc2 = 0
+            mahmut.adc3 = FORWARD
+            mahmut.adc4 = True
+            mahmut.adc5 = 0
 
-        yigit.adc0 = AUTONOMOUS_SPEED
-        # doldur
+            yigit.adc0 = AUTONOMOUS_SPEED
+            # doldur
 
-        if distances['left'] - distances['right'] > 0:
-            d = "sol"
-        elif distances['left'] - distances['right'] < 0:
-            d = "sag"            
+            if distances['left'] - distances['right'] > 0:
+                d = "sol"
+            elif distances['left'] - distances['right'] < 0:
+                d = "sag"            
+            else:
+                d = "orta"
+
+            if GEAR == 0:
+                str_gear = "\tNEUTRAl"
+            if GEAR == 1:
+                str_gear = "\tFORWARD"
+            if GEAR == 2:
+                str_gear = "\tREVERSE"
+
+
+            print(f"\n{str_gear}")
+            print(f"dsrps: {d} error: {round(distances['left'] - distances['right'], 2)}")
+            print(f"speed: {int(speed) :>5} regen: {int(regen) :>5}")
+            
+            #if distances['on'] < 1:
+            if False:
+                mahmut.adc0 = 0
+                pid_controller.pidError = 0
+
         else:
-            d = "orta"
-
-        if GEAR == 0:
-            str_gear = "\tNEUTRAl"
-        if GEAR == 1:
-            str_gear = "\tFORWARD"
-        if GEAR == 2:
-            str_gear = "\tREVERSE"
-
-
-        print(f"{d} {round(distances['left'] - distances['right'], 2)} {str_gear}")
-        
-        #if distances['on'] < 1:
-        if False:
-            mahmut.adc0 = 0
             pid_controller.pidError = 0
+            steering_angle = (l_left_right+1)*1800
 
-    else:
-        pid_controller.pidError = 0
-        steering_angle = (l_left_right+1)*1800
+            speed = mapper(right_trigger, 1, -1, 0, 1000)
+            regen = mapper(left_trigger, 1, -1, 0, 1000)
 
-        speed = mapper(right_trigger, 1, -1, 0, 1000)
-        regen = mapper(left_trigger, 1, -1, 0, 1000)
+            mahmut.adc0 = int(speed)           # speed (0, 1000)
+            mahmut.adc1 = int(steering_angle)  # steering angle (0, 3600)
+            mahmut.adc2 = int(regen)           # regen (0, 1000)
+            mahmut.adc3 = int(GEAR)            # 
+            mahmut.adc4 = int(AUTONOMOUS)      # autonomous
+            mahmut.adc5 = int(EMERGENCY)       # emergency
 
-        mahmut.adc0 = int(speed)           # speed (0, 1000)
-        mahmut.adc1 = int(steering_angle)  # steering angle (0, 3600)
-        mahmut.adc2 = int(regen)           # regen (0, 1000)
-        mahmut.adc3 = int(GEAR)            # 
-        mahmut.adc4 = int(AUTONOMOUS)      # autonomous
-        mahmut.adc5 = int(EMERGENCY)       # emergency
+            yigit.adc0 = mapper(speed, 0, 350, 0, 99)
 
-        yigit.adc0 = mapper(speed, 0, 350, 0, 99)
+            if distances['left'] - distances['right'] > 0.1:
+                d = " left"
+            elif distances['left'] - distances['right'] < -0.1:
+                d = "right"            
+            else:
+                d = "  Mid"
 
-        if distances['left'] - distances['right'] > 0:
-            d = "sol"
-        elif distances['left'] - distances['right'] < 0:
-            d = "sag"            
-        else:
-            d = "orta"
+            if GEAR == 0:
+                str_gear = "\tNEUTRAl"
+            if GEAR == 1:
+                str_gear = "\tFORWARD"
+            if GEAR == 2:
+                str_gear = "\tREVERSE"
 
-        if GEAR == 0:
-            str_gear = "\tNEUTRAl"
-        if GEAR == 1:
-            str_gear = "\tFORWARD"
-        if GEAR == 2:
-            str_gear = "\tREVERSE"
-
-        print(f"{d} {round(distances['left'] - distances['right'], 2)} {str_gear}")
+            print(f"\n{str_gear}")
+            print(f"dsrps: {d} error: {round(distances['left'] - distances['right'], 2)}")
+            print(f"speed: {int(speed) :>5} regen: {int(regen) :>5}")
     
+    else:
+        speed = 0
+        mahmut.adc0 = int(0)
+        mahmut.adc1 = int(1800)
+        mahmut.adc2 = int(0)
+        mahmut.adc3 = int(NEUTRAL)  
+        mahmut.adc4 = int(0)        # autonomous
+        mahmut.adc5 = int(0)        # emergency
+        print(bcolors.FAIL + "!!! Authentication Required !!!" + bcolors.ENDC)
+
+    yigit.adc0 = int(speed)
+    yigit.adc1 = int(steering_angle)
+    yigit.adc2 = int(regen)
+    yigit.adc3 = int(GEAR)
+    yigit.adc4 = int(AUTONOMOUS)
+    yigit.adc5 = int(EMERGENCY)
+
+    lcd.publish(yigit)
     arduino.publish(mahmut)
 
 
@@ -223,6 +269,9 @@ def F1_2020(russell):
     """
         rosrun joy joy_node
     """
+    global YAVIZ
+    global SEKO
+    global TERMINATOR
     global speed
     global AUTONOMOUS
     global REVERSE
@@ -254,9 +303,11 @@ def F1_2020(russell):
     r_left_right = russell.axes[3]
     r_up_down = russell.axes[4]
 
-    # triggers
-    left_trigger = russell.axes[2]
-    right_trigger = russell.axes[5]
+
+    # Destroyer of worlds
+    if BUTTON_START:
+        TERMINATOR ^= True
+
 
     # ABXY Buttons
     BUTTON_A = russell.buttons[0]
@@ -273,15 +324,39 @@ def F1_2020(russell):
     BUTTON_STICK_LEFT = russell.buttons[9]
     BUTTON_STICK_RIGHT = russell.buttons[10]
 
+    
+    if TERMINATOR:
+        #
+        # DON'T TOUCH
+        # SECURITY !!!
+        #    
+        if russell.axes[2] == -1 and russell.axes[5] == -1:
+            YAVIZ = True
+        
+        if YAVIZ == True and russell.axes[2] == 1 and russell.axes[5] == 1:
+            SEKO = True
+        #
+        # DON'T TOUCH
+        # SECURITY !!!
+        #
 
-    if BUTTON_Y:
-        AUTONOMOUS ^= True
-    if BUTTON_X:
-        GEAR = next(gear_generator)
-    if BUTTON_A:
-        LIGHTS ^= True
-    if BUTTON_B:
-        EMERGENCY ^= True
+        # triggers
+        if (YAVIZ == True) and (SEKO == True):
+            left_trigger = russell.axes[2]
+            right_trigger = russell.axes[5]
+        else:
+            # (1, -1) => (0, max_speed)
+            left_trigger = 1
+            right_trigger = 1
+            
+        if BUTTON_Y:
+            AUTONOMOUS ^= True
+        if BUTTON_X:
+            GEAR = next(gear_generator)
+        if BUTTON_A:
+            LIGHTS ^= True
+        if BUTTON_B:
+            EMERGENCY ^= True
 
 
 """ def yolo_callback(data):

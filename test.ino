@@ -23,8 +23,8 @@
 #define     BUFFER_SIZE         32
 #define     GEAR_SCALE          7
 #define     MAX_STEERING_ANGLE  35
-#define     MAX_RPM             350
-#define     MAX_REVERSE_RPM    -100
+#define     MAX_RPM             500
+#define     MAX_REVERSE_RPM    -200
 
 /* LCD */
 #define     ASCII                    48
@@ -155,7 +155,7 @@ void RosCallback(const rosserial_arduino::Adc &mahmut){
     switch(GEAR) {
         case FORWARD:
             rpm.data = map((long) mahmut.adc0, 0, 1000, 0, MAX_RPM); 
-            current.data = 0.9;
+            current.data = 0.8;
             break;
         case REVERSE:
             rpm.data = map((long) mahmut.adc0, 0, 1000, 0, MAX_REVERSE_RPM);
@@ -325,6 +325,10 @@ void setup(){
     nh.advertise(pub);
     delay(100);
 
+    
+    current.data = 0;
+    rpm.data = 0; 
+    
     /* LDC */
     lcd.init();
     lcd.init();
@@ -336,6 +340,31 @@ CAN_INIT:
     } 
     else
         goto CAN_INIT;
+
+        /*
+     * Driving Motor Packet
+    */
+    /* rpm */
+    CAN.beginPacket(0x501);
+    CAN.write(rpm.data_u8[0]);
+    CAN.write(rpm.data_u8[1]);
+    CAN.write(rpm.data_u8[2]);
+    CAN.write(rpm.data_u8[3]);
+    /* current */
+    CAN.write(current.data_u8[0]);
+    CAN.write(current.data_u8[1]);
+    CAN.write(current.data_u8[2]);
+    CAN.write(current.data_u8[3]);
+    CAN.endPacket();
+
+    /* 
+     *  Steering Motor Packet
+    */
+    CAN.beginPacket(0x700);
+    CAN.write(steering_obj.data_u8[0]);
+    CAN.write(steering_obj.data_u8[1]);
+    CAN.write(steering_obj.data_u8[2]);
+    CAN.endPacket();
 }
 
 
@@ -349,7 +378,6 @@ CAN_INIT:
 *   rosrun rosserial_arduino serial_node.py _port:=/dev/ttyXXXn _baud:=57600
 */
 void loop(){
-    long start_t = millis();
     /************ CAN Packet Read ************/ 
     if (CAN.parsePacket())
         if (CAN.packetId() == 0x403)
