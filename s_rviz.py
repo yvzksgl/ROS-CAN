@@ -9,7 +9,7 @@ import os
 
 from sensor_msgs.msg import LaserScan
 
-center_x, center_y = 256, 256
+center_x, center_y = 400, 400
 desired_fps = 15
 
 laser = None
@@ -29,7 +29,11 @@ def lidar_data(data):
     #laser = np.array(data.ranges)
     
     laser[laser > 25] = 0
-    laser *= 30
+    
+    if len(sys.argv) > 1:
+        laser *= int(sys.argv[1])
+    else:
+        laser *= 50
     
     
     d = np.zeros((center_x * 2, center_y * 2))
@@ -39,7 +43,7 @@ def lidar_data(data):
         x = int(sin(index * FI - 90) * item) + center_x
         y = int(cos(index * FI - 90) * item) + center_y
         
-        if not (x > 511 or y > 511):
+        if (0 <= x < (center_x*2)) and (0 <= y < (center_y*2)):
             d[x][y] = 255
 
     cv2.imshow("LIDAR", d)
@@ -54,4 +58,3 @@ if __name__ == "__main__":
     rospy.Subscriber('/scan', LaserScan, lidar_data)
 
     rospy.spin()
-
