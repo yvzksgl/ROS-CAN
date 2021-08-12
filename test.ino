@@ -1,4 +1,4 @@
-/*
+ /*
     @year:        2020/2021
     @author:      Sekomer
     @touch:       aksoz19@itu.edu.tr
@@ -21,23 +21,9 @@
 /* Preprocessing */
 #define     RADIUS              0.28
 #define     BUFFER_SIZE         32
-#define     GEAR_SCALE          7
-#define     MAX_STEERING_ANGLE  35
 #define     MAX_RPM             500
 #define     MAX_REVERSE_RPM    -200
 
-/* LCD */
-#define     ASCII                    48
-#define     LCD_AUTONOMOUS            2
-#define     LCD_SPEED_FIRST           6
-#define     LCD_SPEED_SECOND          7
-#define     LCD_CURRENT_FIRST        11
-#define     LCD_CURRENT_SECOND       13
-#define     LCD_GEAR                  2
-#define     LCD_REGEN                 6
-#define     LCD_BRAKE                10
-#define     LCD_STEERING_FIRST       14
-#define     LCD_STEERING_SECOND      15
 
 /* GEARS */
 #define     NEUTRAL    0
@@ -61,6 +47,12 @@ typedef union {
 
 
 typedef union { 
+    float   data[2];
+    uint8_t data_u8[8];
+} CAN_odom;
+
+
+typedef union { 
     uint16_t data_u16[2];
     uint8_t  data_u8[4]; 
 } STEER;
@@ -68,10 +60,8 @@ typedef union {
 
 
 /* CAN variable decleartions */
-unsigned int speed_odom_collector[8];
-int32_t      odom_speed;
-unsigned int steer_collector[8];
-unsigned int odom_index = 0;
+CAN_odom speed_odom;
+CAN_odom battery_odom;
 
 CAN_Float motor_odometry;
 CAN_Float steer_odometry;
@@ -80,7 +70,6 @@ CAN_Float current;
 /* speed, steering and condition info */
 CAN_Float rpm;
 STEER     steering_obj;
-int32_t   raw_speed;
 int32_t   raw_steer;
 float     regen = 0;
 int32_t   current_position = 0;
@@ -90,6 +79,7 @@ int32_t   current_position = 0;
 int32_t pot_signal_raw;
 int32_t encoder_degree;
 int32_t desired_pos;
+int32_t pot_odom;
 
 
 /* Constant Steering Motor Speeds */
@@ -112,15 +102,11 @@ int32_t         buffer_index = 0;
 int32_t         buffer[BUFFER_SIZE];
 int32_t         buffer_average = 0;
 int32_t         lcd_buffer_average = 0;
-const int32_t   EncoderPin = A0;
+const int32_t   EncoderPin = A1;
 /**/
 
 /* Debug and Log */
 geometry_msgs::Vector3 pot_data;
-
-LiquidCrystal_I2C lcd(0x27, 20, 4);
-char first_row[17]  = {'A','=',' ',' ','V','=',' ',' ',' ','C','=',' ','.',' ',' ',' ','\0'};
-char second_row[17] = {'G','=',' ',' ','R','=',' ',' ','B','=',' ',' ','S','=',' ',' ','\0'};
 
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -138,11 +124,10 @@ void RosCallback(const rosserial_arduino::Adc &mahmut){
      *      * mahmut.adc1 : uint16 => Angle Data
      *      * mahmut.adc2 : uint16 => Regen Data
      *      * mahmut.adc3 : uint16 => GEAR  Data
-     *      * mahmut.adc4 : uint16 => Light Data
+     *      * mahmut.adc4 : uint16 => Autonomous Data
      *      * mahmut.adc5 : uint16 => SOS   Data
     */
     
-    raw_speed  = map(mahmut.adc0, 0, 1000, 0, 99);
     raw_steer  = mahmut.adc1;
     regen      = mahmut.adc2;
     GEAR       = mahmut.adc3;
@@ -188,8 +173,7 @@ void RosCallback(const rosserial_arduino::Adc &mahmut){
     /* TAM TERSİYSE */
     
     desired_pos = mahmut.adc1;
-    
-    
+
     change_value = desired_pos - current_position; // get change value
 
     /* Speed Control */
@@ -201,8 +185,14 @@ void RosCallback(const rosserial_arduino::Adc &mahmut){
     else
         steer_speed = max_steer_speed;
     */
+
+    if (! AUTONOMOUS)
+      steer_speed = map(abs(change_value), 0, 1800, min_steer_speed, max_steer_speed);
+    else if (change_value < 250)
+      steer_speed = min_steer_speed;
+    else
+      steer_speed = max_steer_speed;
     
-    steer_speed = map(abs(change_value), 0, 1800, min_steer_speed, max_steer_speed);
     /*
         @steering_obj.data_u16[0]  => steering speed
         @steering_obj.data_u8[2]   => steering 
@@ -325,14 +315,8 @@ void setup(){
     nh.advertise(pub);
     delay(100);
 
-    
     current.data = 0;
     rpm.data = 0; 
-    
-    /* LDC */
-    lcd.init();
-    lcd.init();
-    lcd.backlight();
     
 CAN_INIT:
     if(1 == CAN.begin(1E6)) {
@@ -341,10 +325,11 @@ CAN_INIT:
     else
         goto CAN_INIT;
 
-        /*
+
+    // safety 
+     /*
      * Driving Motor Packet
-    */
-    /* rpm */
+        rpm */
     CAN.beginPacket(0x501);
     CAN.write(rpm.data_u8[0]);
     CAN.write(rpm.data_u8[1]);
@@ -356,10 +341,7 @@ CAN_INIT:
     CAN.write(current.data_u8[2]);
     CAN.write(current.data_u8[3]);
     CAN.endPacket();
-
-    /* 
-     *  Steering Motor Packet
-    */
+    /* Steering Motor Packet */
     CAN.beginPacket(0x700);
     CAN.write(steering_obj.data_u8[0]);
     CAN.write(steering_obj.data_u8[1]);
@@ -371,7 +353,7 @@ CAN_INIT:
 /////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////
 
-
+int index = 0;
 /*
 *   Arduino Loop
 *
@@ -379,65 +361,50 @@ CAN_INIT:
 */
 void loop(){
     /************ CAN Packet Read ************/ 
-    if (CAN.parsePacket())
-        if (CAN.packetId() == 0x403)
+    if (CAN.parsePacket()) {
+        if (CAN.packetId() == 0x403) {
             while (CAN.available())
-                speed_odom_collector[odom_index++] = CAN.read();
-    
-    odom_index ^= odom_index;
+              speed_odom.data_u8[index++] = CAN.read();
+        }
+        else if (CAN.packetId() == 0x402)
+          while (CAN.available())
+              battery_odom.data_u8[index++] = CAN.read();
+        index ^= index;
+    }
+
     
     /****************** Encoder Signal ******************/ 
     pot_signal_raw = analogRead(EncoderPin);
-    encoder_degree = map(pot_signal_raw, 0, 1023, 0, 3600);
+    if (pot_signal_raw > 830)
+      pot_signal_raw = 830;
+
+    
+     
+    encoder_degree = map(pot_signal_raw, 0, 830, 0, 3600);
 
     buffer[buffer_index++] = encoder_degree;
     buffer_average = buffer_avg(buffer, BUFFER_SIZE);
     lcd_buffer_average = map(buffer_average, 0, 3600, 0, 99);
     buffer_index = (buffer_index > BUFFER_SIZE ? 0 : buffer_index);
     
-    int32_t temp = buffer_average;
+    pot_odom = buffer_average;
     
     /* DRIVING MODE */
-    if (! AUTONOMOUS)
-        buffer_average = 1800;
+    //if (! AUTONOMOUS)
+        //buffer_average = 1800;
     
     current_position = buffer_average;
 
     
     /******************** Debug Topic ******************/ 
     /* rpm value */
-    pot_data.x = rpm.data;
+    pot_data.x = speed_odom.data[1];
     /* pot value */
     pot_data.y = buffer_average;
     /* desired joystick or autonomous steering position */
-    pot_data.z = temp;
+    pot_data.z = battery_odom.data[0];
     pub.publish(&pot_data);
 
-
-    /*
-     *  This part has been moved to another microcontroller
-    */
-
-    /*    
-    first_row[LCD_AUTONOMOUS]         = AUTONOMOUS + ASCII;
-    first_row[LCD_SPEED_FIRST]        = raw_speed / 10 + ASCII; 
-    first_row[LCD_SPEED_SECOND]       = raw_speed % 10 + ASCII;
-    first_row[LCD_CURRENT_FIRST]      = (int) current.data + ASCII;
-    first_row[LCD_CURRENT_SECOND]     = int(current.data * 10.0)%10 + ASCII;
-    first_row[15] = (anil++ % 2) ? 'x' : '+';  
-    
-    second_row[LCD_GEAR]              = (GEAR == 1 ? 'F' : (GEAR == 2 ? 'R' : 'N'));
-    second_row[LCD_REGEN]             = map(regen, 0, 1000, 0, 9) + ASCII;
-    second_row[LCD_BRAKE]             = map(brake, 0, 1000, 0, 9) + ASCII;
-    second_row[LCD_STEERING_FIRST]    = lcd_buffer_average / 10 + ASCII;
-    second_row[LCD_STEERING_SECOND]   = lcd_buffer_average % 10 + ASCII;
-    "/* This part drop node hertz from ~185 to 17
-    lcd.setCursor(0,0);
-    lcd.print(first_row);
-    lcd.setCursor(0,1);
-    lcd.print(second_row);
-    */
- 
     nh.spinOnce();
 }
 

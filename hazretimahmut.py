@@ -2,12 +2,15 @@
 # -*- coding: UTF-8 -*-
 
 
+import os
+import sys
+import math
 from numpy.lib.function_base import average
 import rospy
 from sensor_msgs.msg import LaserScan, Joy
-from geometry_msgs.msg import Vector3
+from geometry_msgs.msg import Vector3, Point
 import numpy as np
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, String
 from rosserial_arduino.msg import Adc
 from itertools import cycle
 
@@ -18,24 +21,38 @@ speed = 0
 regen = 0
 state = ""
 steering_angle = 1800
+speed_odometry = 0
 
-AUTONOMOUS_SPEED = 75 
+AUTONOMOUS_SPEED = 0 
 
 NEUTRAL = 0
 FORWARD = 1
 REVERSE = 2
 
+CAR_WIDTH = 1.5
+CAR_LENGTH = 2.25
+
+twothird = 850
+
 
 class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+    HEADER = '\033[95m'     #mor
+    OKBLUE = '\033[94m'     #mavi
+    OKCYAN = '\033[96m'     #turkuaz
+    OKGREEN = '\033[92m'    #yeşil
+    WARNING = '\033[93m'    #sarı
+    FAIL = '\033[91m'       #kırmızı
+    ENDC = '\033[0m'        #beyaz
+    BOLD = '\033[1m'        #kalın beyaz
+    UNDERLINE = '\033[4m'   #aktı çizili beyaz
+
+
+radius = None
+def ackermann(fi, L, t):
+    global radius
+    toa = math.tan(math.radians(fi))
+    radius = (L + (t/2 * toa)) / toa
+    return radius 
 
 
 def gen():
@@ -78,6 +95,16 @@ BUTTON_START = 0
 BUTTON_STICK_LEFT = 0
 BUTTON_STICK_RIGHT = 0 
 
+# parking
+is_parking_mode = False
+is_durak_mode = False
+park_coordinate = None
+# 0->(dikey / x)
+# 1->(yatay / y)
+DIKEY = 0
+YATAY = 1
+park_distance = np.array([0, 0], dtype=np.float32)
+#/parking
 
 def mapper(value, in_min, in_max, out_min, out_max):
     return (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
@@ -118,12 +145,35 @@ class PID(object):
         print("teta: {:.2f}".format(self.teta))
         return self.teta
 
+def control_mahmut(data):
+    # speed
+    if (data.adc0 > 1000):
+        data.adc0 = 1000
+    elif (data.adc0 < 0):
+        data.adc0 = 0
+    # steer
+    if (data.adc1 > 3600):
+        data.adc1 = 3600
+    elif (data.adc1 < 0):
+        data.adc1 = 0
+    # regen
+    if (data.adc2 > 1000):
+        data.adc2 = 1000
+    elif (data.adc2 < 0):
+        data.adc2 = 0
+
 
       
 def lidar_data(veri_durak):
     global speed 
     global regen
+    global state
     global steering_angle
+    global is_parking_mode
+    global is_durak_mode
+    global park_coordinate
+    global park_distance
+    global speed_odometry
 
     sol_x = np.array(veri_durak.ranges[300:360])
     sol_y = np.array(veri_durak.ranges[240:300])
@@ -148,27 +198,67 @@ def lidar_data(veri_durak):
         'left': np.average(sol_array)
     }
     
-
     if TERMINATOR:
         if AUTONOMOUS:
-            speed = AUTONOMOUS_SPEED
+            # Normal Autonomous
+            if not is_parking_mode:
+                speed = AUTONOMOUS_SPEED
+                #
+                #   CHECK THE DIRECTION
+                #
+                steering_angle = pid_controller.calculate(distances['left'] - distances['right'])
+                angle = (steering_angle + 0.5) * 3600
+
+                # doldur
+                mahmut.adc0 = int(speed)
+                mahmut.adc1 = int(angle)
+                mahmut.adc2 = 0
+                mahmut.adc3 = FORWARD
+                mahmut.adc4 = True
+                mahmut.adc5 = 0
+
+                yigit.adc0 = AUTONOMOUS_SPEED
+                # doldur
+            
+            # <Parking Autonomous>
+            elif is_parking_mode:
+                speed = AUTONOMOUS_SPEED
+
+                if True: # (park_distance[DIKEY] > 4):
+                    print("Two Third Takip")                
+                    if (twothird - park_coordinate) > 0:
+                        target_diff = (twothird - park_coordinate) / twothird
+                    else:
+                        target_diff = (twothird - park_coordinate) / (1280 - twothird)
+                else:
+                    print("Middle Takip")
+                    target_diff = (640 - park_coordinate) / 1280
+                
+                steer = (target_diff + 0.5) * 3600
+
+                #test
+                print("yatay", park_distance[YATAY])
+                print("dikey", park_distance[DIKEY])
+                if distances['on'] < 1 and speed_odometry >= 0:
+                    speed = 0
+                    regen = 1000
+                    # brake
+
+                # </Parking Autonomous>
+
+                mahmut.adc0 = int(speed)
+                mahmut.adc1 = int(steer)
+                mahmut.adc2 = 0
+                mahmut.adc3 = FORWARD
+                mahmut.adc4 = True
+                mahmut.adc5 = 0
+                
+            elif is_durak_mode:
+                pass
+            
             #
-            #   CHECK THE DIRECTION
-            #
-            steering_angle = pid_controller.calculate(distances['left'] - distances['right'])
-            angle = (steering_angle + 0.5) * 3600
-
-            # doldur
-            mahmut.adc0 = int(speed)
-            mahmut.adc1 = int(angle)
-            mahmut.adc2 = 0
-            mahmut.adc3 = FORWARD
-            mahmut.adc4 = True
-            mahmut.adc5 = 0
-
-            yigit.adc0 = AUTONOMOUS_SPEED
-            # doldur
-
+            #   LOGGER
+            # 
             if distances['left'] - distances['right'] > 0:
                 d = "sol"
             elif distances['left'] - distances['right'] < 0:
@@ -182,17 +272,14 @@ def lidar_data(veri_durak):
                 str_gear = "\tFORWARD"
             if GEAR == 2:
                 str_gear = "\tREVERSE"
-
+            if is_parking_mode:
+                str_gear += " (Parking Mode)"
 
             print(f"\n{str_gear}")
             print(f"dsrps: {d} error: {round(distances['left'] - distances['right'], 2)}")
             print(f"speed: {int(speed) :>5} regen: {int(regen) :>5}")
             
-            #if distances['on'] < 1:
-            if False:
-                mahmut.adc0 = 0
-                pid_controller.pidError = 0
-
+        # f710
         else:
             pid_controller.pidError = 0
             steering_angle = (l_left_right+1)*1800
@@ -227,6 +314,7 @@ def lidar_data(veri_durak):
             print(f"dsrps: {d} error: {round(distances['left'] - distances['right'], 2)}")
             print(f"speed: {int(speed) :>5} regen: {int(regen) :>5}")
     
+    # no auth
     else:
         speed = 0
         mahmut.adc0 = int(0)
@@ -244,9 +332,12 @@ def lidar_data(veri_durak):
     yigit.adc4 = int(AUTONOMOUS)
     yigit.adc5 = int(EMERGENCY)
 
-    print("sag uzaklık", np.average(right_array))
-    print("sol uzaklık", np.average(sol_array))
+    print("sag uzaklık:", np.average(right_array))
+    print("sol uzaklık:", np.average(sol_array))
     lcd.publish(yigit)
+
+    control_mahmut(mahmut)
+    print(mahmut.adc1)
     arduino.publish(mahmut)
 
 
@@ -307,6 +398,8 @@ def F1_2020(russell):
     global BUTTON_STICK_LEFT
     global BUTTON_STICK_RIGHT
 
+    global is_parking_mode
+
     # left strick
     l_left_right = russell.axes[0]
     l_up_down = russell.axes[1]
@@ -365,14 +458,42 @@ def F1_2020(russell):
         if BUTTON_X:
             GEAR = next(gear_generator)
         if BUTTON_A:
-            LIGHTS ^= True
+            is_parking_mode ^= True
         if BUTTON_B:
             EMERGENCY ^= True
 
 
-""" def yolo_callback(data):
+"""
+<PARK CALLBACKS>
+"""
+
+# String data
+def yolo_callback(data):
     global state
-    state = data.data """
+    global is_parking_mode
+    state = data.data
+    
+    if state == "Park Yeri":
+        #is_parking_mode = True
+        pass
+
+# String data
+def park_coordinate_callback(park_data):
+    global park_coordinate
+    if park_data.data=='None':
+        park_coordinate='None'
+    else:
+        park_coordinate = float(park_data.data)
+
+
+# Point(x, y, z) data
+def park_distance_callback(data):
+    park_distance[0] = abs(data.z)
+    park_distance[1] = abs(data.y)
+
+"""
+</PARK CALLBACKS>
+"""
 
 def haydi_gel_icelim(data):
     global CURRENT 
@@ -381,10 +502,12 @@ def haydi_gel_icelim(data):
 
 if __name__ == "__main__":
     rospy.init_node('pid',anonymous=True)
-    rospy.Subscriber('/scan', LaserScan, lidar_data)
-    rospy.Subscriber('/joy', Joy, F1_2020)
-    rospy.Subscriber('/pot_topic', Vector3, haydi_gel_icelim)
-    #rospy.Subscriber('/yolo_topic', String, yolo_callback)
+    rospy.Subscriber('/scan', LaserScan, lidar_data, queue_size=10)
+    rospy.Subscriber('/joy', Joy, F1_2020, queue_size=10)
+    rospy.Subscriber('/pot_topic', Vector3, haydi_gel_icelim, queue_size=10)
+    rospy.Subscriber('yolo_park', String, park_coordinate_callback, queue_size=10)
+    rospy.Subscriber('/zed_yolo_raw_distance', String, yolo_callback, queue_size=10)
+    rospy.Subscriber('zed_yolo_sign_coord', Point, park_distance_callback, queue_size=10)
 
     arduino = rospy.Publisher("/seko", Adc, queue_size=10, latch=True)
     lcd = rospy.Publisher("/screen", Adc, queue_size=10, latch=True)
