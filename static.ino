@@ -30,8 +30,8 @@
 #define     MOTOR_ODOM_ID      0x403
 #define     BATTERY_INFO_ID    0x402
 
-#define     RPM_MODE           0
-#define     CURRENT_MODE       1
+#define     RPM_MODE           1
+#define     CURRENT_MODE       0
 
 /**
 *   DATA TYPES FOR CAN COMMUNICATION
@@ -110,8 +110,8 @@ static volatile int32_t change_value = 0;       // momentary change in steering 
 static volatile int32_t  AUTONOMOUS = 0;
 static volatile int32_t  EXTRA;
 
-static int32_t           brake_speed;
-static int32_t           brake_direction;
+static int32_t           is_braking;
+static int32_t           brake_speed = 8;
 REGEN_BRAKE              regen_brake_packet;
 
 /* Encoder Buffer Variables */
@@ -149,7 +149,7 @@ void RosCallback(const rosserial_arduino::Adc &mahmut){
     */
     
     raw_steer  = mahmut.adc1;
-    regen      = mahmut.adc2;
+    regen      = mahmut.adc2 % 10000;
     GEAR       = mahmut.adc3;
     AUTONOMOUS = mahmut.adc4;
     EXTRA      = mahmut.adc5;
@@ -165,7 +165,7 @@ void RosCallback(const rosserial_arduino::Adc &mahmut){
               break;
           case REVERSE:
               //rpm.data = map((long) mahmut.adc0, 0, 1000, 0, MAX_REVERSE_RPM);
-              rpm.data = mahmut.adc0;
+              rpm.data = (-1) * float(mahmut.adc0);
               current.data = 0.8;
               break;
           case NEUTRAL:
@@ -182,8 +182,8 @@ void RosCallback(const rosserial_arduino::Adc &mahmut){
               rpm.data = 20000;
               break;
           case REVERSE:
-              current.data = float(mahmut.adc0) / 1000.0;
               rpm.data = -20000;
+              current.data = float(mahmut.adc0) / 1000.0;
               break;
           case NEUTRAL:
               current.data = 0;
@@ -206,29 +206,13 @@ void RosCallback(const rosserial_arduino::Adc &mahmut){
 
     /* BRAKING */
     /******************************************/
-    regen_brake_packet.data = mahmut.adc2;
-    brake_speed = regen_brake_packet.bits.brake_motor_speed;
-    brake_direction = regen_brake_packet.bits.direction;
-    //regen = regen_brake_packet.bits.regen;
+    is_braking = int32_t(mahmut.adc2) / 10000;
 
-    recep_tayyip_ercetin.data_u16[0] = brake_direction;
-    recep_tayyip_ercetin.data_u8[2] = brake_speed;
-
-    if (brake_speed != 0) {
-        recep_tayyip_ercetin.data_u16[0] = brake_direction;
-        recep_tayyip_ercetin.data_u8[2] = brake_speed;    
-        /* security */
-        //rpm.data = 0;
-        //current.data = 0;
-    }
-    else {
-        recep_tayyip_ercetin.data_u16[0] = 0;
-        recep_tayyip_ercetin.data_u8[2] = 0;
-    }
+    recep_tayyip_ercetin.data_u16[0] = brake_speed;
+    recep_tayyip_ercetin.data_u8[2] = is_braking;
     
     /***************************************************/
 
-    
     sekomerizasyon(current);
     
     /******************** Steering Logic ******************/ 
@@ -260,17 +244,6 @@ void RosCallback(const rosserial_arduino::Adc &mahmut){
       cetin = 1800;
       
     steer_speed = map(cetin, 0, 1800, min_steer_speed, max_steer_speed);
-
-    /*fren experimental*/
-    if (regen) {
-        recep_tayyip_ercetin.data_u16[0] = 0;
-        recep_tayyip_ercetin.data_u8[2] = 8;
-    }
-    else {
-        recep_tayyip_ercetin.data_u16[0] = 1;
-        recep_tayyip_ercetin.data_u8[2] = 8;
-    }
-
     
     /*
         @steering_obj.data_u16[0]  => steering speed
@@ -315,13 +288,13 @@ void RosCallback(const rosserial_arduino::Adc &mahmut){
     CAN.write(steering_obj.data_u8[2]);
     CAN.endPacket();
 
-    /*
+    /* Braking Packet */
     CAN.beginPacket(BRAKE_ID);
     CAN.write(recep_tayyip_ercetin.data_u8[0]);
     CAN.write(recep_tayyip_ercetin.data_u8[1]);
     CAN.write(recep_tayyip_ercetin.data_u8[2]);
     CAN.endPacket();
-    */
+    
 }   
 
 
@@ -508,7 +481,7 @@ void loop(){
     pot_data.adc1 = pot_odom;
     /* bus voltage / bus current */
     pot_data.adc2 = battery_odom.data[0];
-    pot_data.adc3 = desired_pos;
+    pot_data.adc3 = is_braking;
     /* unused */
     pot_data.adc4 = current_position;
     pot_data.adc5 = (change_value);
