@@ -11,10 +11,12 @@ import os
 import sys
 import csv
 import math
+import time
 import rospy
 import numba
 import seaborn
 import numpy as np
+from numba import float32 as f32
 from  matplotlib import pyplot as plt
 from  rosserial_arduino.msg import Adc
 from  std_msgs.msg import Float32, String
@@ -26,13 +28,8 @@ from  pynput.keyboard import Key, Listener, GlobalHotKeys
 
 np.seterr('raise')
 
-BICYCLE_LENGTH = 3.5
 
-sol_laser = None
-sag_laser = None
-collecting_data = False
-
-#global variables
+# global variables #
 speed = 0
 regen = 0
 state = ""
@@ -40,43 +37,56 @@ steering_angle = 1800
 speed_odometry = 0
 brake_speed = 0
 brake_motor_direction = 1
-
-AUTONOMOUS_SPEED = 150
-
+sol_laser = None
+sag_laser = None
+collecting_data = False
+SOL = 0
+ORTA = 1
+SAG = 2 
+AUTONOMOUS_SPEED = 25 # never change this variable randomly!!!
+AUTONOMOUS_SPEED_RECOVERY = AUTONOMOUS_SPEED
 POT_CENTER = 1800
-MAX_RPM_MODE_SPEED = 1000
-
+MAX_RPM_MODE_SPEED = 200
 RPM_MODE = 1
 CURRENT_MODE = 0
-
 driving_mode = RPM_MODE
-
 DORU = (1 == 1)
-
 left_tracking = False
 right_tracking = False
 mid_tracking = True
-
 NEUTRAL = 0
 FORWARD = 1
 REVERSE = 2
-
 CAR_WIDTH = 1.5
 CAR_LENGTH = 2.25
-
-twothird = 950
-
 CURRENT    = 0
 BUS_VOLTAGE = 0
+BICYCLE_LENGTH = 3.5
+SOL_FIXED = 2
+SAG_FIXED = 2
+kararVerici = np.array([0, 1, 0])
+recently_stopped = False
+orhandaldal = np.inf
+brake = False
+brake_value = 0
+roswtf = False
+FULL_RIGHT = 3600
 
-CRUISE_CONTROL = False
-cruiseSpeed = 50
+# durak experimental #
+first_stop_counter = False
+first_stop = False
+second_stop_counter = False
+second_stop = False
+#*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-#
 
-YAVIZ = False
-SEKO  = False
-TERMINATOR = False
+arduino_odometry = {
+    'speed': .0,
+    'steering_angle': .0,
+    'bus_voltage': .0,
+    'bus_current': .0
+}
 
-
+# terminal colors #
 class bcolors:
     HEADER = '\033[95m'     #mor
     OKBLUE = '\033[94m'     #mavi
@@ -87,52 +97,24 @@ class bcolors:
     ENDC = '\033[0m'        #beyaz
     BOLD = '\033[1m'        #kalın beyaz
     UNDERLINE = '\033[4m'   #aktı çizili beyaz
+#*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*#
 
-
-global_radius = None
-@numba.jit(nopython=True, fastmath=True)
-def ackermann(fi, L, t):
-    toa = math.tan(math.radians(fi))
-    radius = (L + (t/2 * toa)) / toa
-    return radius 
-
+# controller #
 def gen():
     gears = [NEUTRAL, FORWARD, NEUTRAL, REVERSE]    
     for i in cycle(gears):
         yield i
 
 gear_generator = gen()
-
 AUTONOMOUS = False
 GEAR       = next(gear_generator)
 DIRECTION  = True
 LIGHTS     = False
 EMERGENCY  = False
-
-SOL_FIXED = 2
-SAG_FIXED = 2
-kararVerici = np.array([0, 1, 0])
-
-#durak1
-first_stop_counter = False
-first_stop = False
-
-#durak2
-second_stop_counter = False
-second_stop = False
-
-arduino_odometry = {
-    'speed': .0,
-    'steering_angle': .0,
-    'bus_voltage': .0,
-    'bus_current': .0
-}
-
-zed_x = None
-zed_y = None
-denk_coef = None
-closest_point = None
-
+CRUISE_CONTROL = False
+YAVIZ = False
+SEKO  = False
+TERMINATOR = False
 l_left_right = 0
 l_up_down = 0
 r_left_right = 0
@@ -149,23 +131,67 @@ BUTTON_BACK = 0
 BUTTON_START = 0
 BUTTON_STICK_LEFT = 0
 BUTTON_STICK_RIGHT = 0 
+#*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-#
 
 # parking
 is_parking_mode = False
 is_curve_parking = False
 is_durak_mode = False
 park_coordinate = None
-# 0->(dikey / x)
-# 1->(yatay / y)
-DIKEY = 0
-YATAY = 1
+zed_x = None
+zed_y = None
+denk_coef = None
+closest_point = None
+is_curve_created = False
+CRITICAL_PARKING_DISTANCE = 20
+CALCULATE_PARKING_SIGN_DISTANCE = 15
+locked_on_target = False
+parking_sign_current_distance = None
+
+
+ACKERMAN_RADIUS = 4
+LABEL_OFFSET = 9.
+ERROR_ACCEPTANCE = .3
+
+DIKEY = 0 # 0->(dikey / x)
+YATAY = 1 # 1->(yatay / y)
+twothird = 950
+stage1 = False
 park_distance = np.array([0, 0], dtype=np.float32)
-#/parking
+#*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-#
 
+# helper funcs #
+global_radius = None
+@numba.jit(f32(f32, f32, f32), nopython=True, fastmath=True)
+def ackermann(fi, L, t):
+    toa = math.tan(math.radians(fi))
+    radius = (L + (t/2 * toa)) / toa
+    return radius 
 
+@numba.jit(f32(f32, f32, f32, f32, f32), nopython=True, fastmath=True, cache=True)
 def mapper(value, in_min, in_max, out_min, out_max):
     return (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
 
+@numba.jit(f32(f32, f32), nopython=True, fastmath=True, cache=True)
+def potingen_straße(desired, difference):
+    return (desired + 0.5 + difference) * 3600
+
+@numba.jit(f32(f32, f32, f32, f32, f32, f32), nopython=True, fastmath=True, cache=True)
+def fast_pid(p_error, Kp, i_error, Ki, d_error, Kd):
+    return (p_error * Kp) + (i_error * Ki) + (d_error * Kd)
+
+def control_mahmut(data):
+    # speed
+    if (data.adc0 > 1000):
+        data.adc0 = 1000
+    elif (data.adc0 < 0):
+        data.adc0 = 0
+    # steer
+    if (data.adc1 > 3600):
+        data.adc1 = 3600
+    elif (data.adc1 < 0):
+        data.adc1 = 0
+#*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*#
 
 class Steering_Algorithms:
     class PID(object):
@@ -180,7 +206,7 @@ class Steering_Algorithms:
             self.pidError = 0.0
             self.teta     = 0.0
             self.error    = 0.0
-        
+
         def calculate(self, distance):
             self.error = distance - self.teta
             self.p_error = self.error
@@ -191,7 +217,7 @@ class Steering_Algorithms:
             if distance < 0.15:
                 self.i_error = 0
             
-            self.pidError = (self.p_error * self.Kp) + (self.i_error * self.Ki) + (self.d_error * self.Kd)
+            self.pidError = fast_pid(self.p_error, self.Kp, self.i_error, self.Ki, self.d_error, self.Kd)
             self.teta += self.pidError
 
             if self.teta < -0.5:
@@ -245,112 +271,94 @@ class Steering_Algorithms:
                 self.steering = -.5
             elif self.steering > .5:
                 self.steering = .5
- 
-#####################################################################################################################
 
-# String data
-class Parking(object):
+#####################################################################################################################
+"""
+    Stay Away
+"""
+class park_seko(object):
+    def __init__(self, ackermann_radius, label_offset, error_acceptance = 0.5)
+        self.__target = []
+        self.__margin = np.inf
+        self.__destiny = False
+        self.__current_pos = []
+        self.__label_offset = label_offset
+        self.__error_acceptance = error_acceptance
+        self.__ackermann_radius = ackermann_radius
+
+    def __eval__(self):
+        # offset x mi y mi kontrol et
+        #@ZED değiştirilecek!
+        ackermann_target_x = __target[0] - ACKERMAN_RADIUS - LABEL_OFFSET # +- değişebilir
+        ackermann_target_y = __target[1] - ACKERMAN_RADIUS # +- değişebilir
+        xd = math.pow(ackermann_target_x - __current_pos[0], 2)
+        yd = math.pow(ackermann_target_y - __current_pos[1], 2)
+        self.__margin = math.sqrt(xd + yd)
+        
+        if self.__margin < self.__error_acceptance:
+            self.__destiny = True
+            
+    @staticmethod
+    @numba.jit(f32(f32, f32, f32, f32), nopython=True, cache=True, fastmath=True)
+    def __f__(tx, ty, cx, cy):
+        #experimental, for future#
+        pass
+
+
+class serhatos(object):
     def __init__(self):
         self.coefficents = []
         self.steering_angle = 0
         self.CP = list()
-
     def find_curve(self, x, y, degree):
         self.coefficents = np.polyfit(x, y, degree)
         return self.coefficents
-
-    def find_all_point_on_the_curve(self,coef,park_x,park_y):
-        all_x = np.zeros(shape=(10,))
-        all_y = np.linspace(0,park_y,10)
-        
-        for a,x in enumerate(all_y):
+    def find_all_point_on_the_curve(self,coef,park_y):
+        all_y = np.zeros(shape=(10,))
+        all_x = np.linspace(-3,park_y,10)
+        for a,x in enumerate(all_x):
             tot = 0
             for i,j in enumerate(reversed(coef)):
                 tot += (x **i) * j
-            all_x[a] = tot
-
+            all_y[a] = tot
         for i, j in zip(all_x,all_y):
             self.CP.append(CurvePoint(i, j))
-
-    def choose_closest_point(self,all_x,all_y,x,y):
-        min_error = 1000
+            print(i, j)
+    def choose_closest_point(self, x, y):
+        min_error = np.inf
+        return_obj = None
         for obj in self.CP:
+            if obj.visited: continue
             error_x = obj.x - x
             error_y = obj.y - y
-            error = (error_x)**2 + (error_y)**2
-            if error < min_error: return obj
-
-    def differ_sdp(self,all_x,all_y,x,y):
-        min_x = 100
-        min_y = 100
-        distance = (min_x-x)**2+(min_y-y)**2
-        for i in all_x:
-            for j in all_y:
-                new_min = (i-x)**2 + (j-y)**2
-                if new_min<distance:
-                    min_x = i
-                    min_y = j
-        point = [min_x,min_y]
-        return point
-
-    def is_that_point(self,p1,p2):
-        error_x = p1[0]-p2[0]
-        error_y = p1[1]-p2[1]
-
+            error = math.pow(error_x, 2) + math.pow(error_y, 2)
+            if error < min_error: 
+                return_obj = obj
+                min_error = error
+        return return_obj
+    def is_that_point(self,p1,p2_x,p2_y):
+        if not p1 or not p2_x: return
+        error_x = p1.x-p2_x
+        error_y = p1.y-p2_y
         error = math.sqrt(pow(error_x, 2) + pow(error_y, 2))
-
-        if error<0.25:
+        if error<5:
             return True
         else:
             return False
-
     def point2pointAngle(self,p1,p2):
-        error_x = p1[0]-p2[0]
-        error_y = p1[1]-p2[1]
-        
-        angle = math.degrees(math.tana(error_x/error_y))
-        
+        error_x = p1.x-p2[0]
+        error_y = p1.y-p2[1]
+        angle = math.degrees(math.atan(error_x/error_y))
         return angle
-
     def distance_calculator(self,p1,p2):
         distance_x = p1[0]-p2[0]
         distance_y = p1[1]-p2[1]
-
         distance = ((distance_x)**2+(distance_y)**2)**1/2
-
         return distance
-
-
-class CurvePoint:
-    def __init__(self, x, y, visited=False):
-        self.x = x
-        self.y = y
-        self.visited = visited
-
 #####################################################################################################################
 
-@numba.jit(nopython=True, fastmath=True, cache=True)
-def potingen_straße(desired, difference):
-    return (desired + 0.5 + difference) * 3600
 
-def control_mahmut(data):
-    # speed
-    if (data.adc0 > 1000):
-        data.adc0 = 1000
-    elif (data.adc0 < 0):
-        data.adc0 = 0
-    # steer
-    if (data.adc1 > 3600):
-        data.adc1 = 3600
-    elif (data.adc1 < 0):
-        data.adc1 = 0
-    # regen
-    if (data.adc2 > 1000):
-        data.adc2 = 1000
-    elif (data.adc2 < 0):
-        data.adc2 = 0
-
-      
+# main function #
 def lidar_data(veri_durak):
     global speed 
     global regen
@@ -361,21 +369,23 @@ def lidar_data(veri_durak):
     global park_coordinate
     global park_distance
     global speed_odometry
-
+    global AUTONOMOUS_SPEED
+    global FULL_RIGHT
     global brake_speed
     global brake_motor_direction
-
+    global stage1
     global left_tracking
     global right_tracking
     global mid_tracking
     global driving_mode
     global pürşit
     global is_curve_parking
-
+    # PARK #
     global zed_x
     global zed_y
     global denk_coef
     global closest_point
+    global recently_stopped
     ####################################
     # YAPAY ZEKA DUNYAYI ELE GECIRECEK #
     ####################################
@@ -383,12 +393,52 @@ def lidar_data(veri_durak):
     global sol_laser
     global sag_laser
     global collecting_data
+    global brake
+    global brake_value
+    global roswtf
+    global orhandaldal
+
+    global parking_sign_current_distance
 
     sol_laser = np.array(veri_durak.ranges[0:369], dtype=np.float32)
     sag_laser = np.array(veri_durak.ranges[1079:1439], dtype=np.float32)
     
     sol_laser[sol_laser>25] = 25
     sag_laser[sag_laser>25] = 25
+
+    if brake:
+        brake_value = 10000
+    else:
+        brake_value = 0
+
+    """
+    if roswtf:
+        mahmut.adc0 = 0
+        mahmut.adc2 = 11000
+        arduino.publish(mahmut)
+
+        print(bcolors.WARNING+"Hoş geldiğiz!"+bcolors.ENDC)
+        start = time.time()
+        while time.time() - start < 10:
+            arduino.publish(mahmut) 
+
+        mahmut.adc0 = AUTONOMOUS_SPEED_RECOVERY
+        mahmut.adc2 = 0        
+        roswtf = False
+        orhandaldal = time.time()
+        print(bcolors.WARNING+"BBBBBB!"+bcolors.ENDC)
+    """
+
+    if roswtf:
+        mahmut.adc0 = 0
+        mahmut.adc2 = 11000
+        arduino.publish(mahmut)
+        AUTONOMOUS_SPEED = AUTONOMOUS_SPEED_RECOVERY
+        print(bcolors.WARNING+"Hoş geldiğiz!"+bcolors.ENDC)
+        rospy.sleep(10)
+        roswtf = False
+        orhandaldal = time.time()
+        print(bcolors.WARNING+"BBBBBB!"+bcolors.ENDC)
 
     if collecting_data:
         writer.writerow([sol_laser, sag_laser, arduino_odometry['steering_angle']])
@@ -418,11 +468,13 @@ def lidar_data(veri_durak):
 
     distances = {
         'right': np.average(right_array),
-        'on' : np.average(on_array),
-        'left': np.average(sol_array)
+        'left': np.average(sol_array),
+        'on' : np.average(on_array)
     }
     
-    
+    if recently_stopped and (time.time() - orhandaldal > 10.0):
+        recently_stopped = False
+
     if TERMINATOR:
         if AUTONOMOUS:
             print(bcolors.WARNING + "AUTONOMOUS" + bcolors.ENDC)
@@ -443,22 +495,11 @@ def lidar_data(veri_durak):
                 if(left_point_distance > 5):
                     left_point_distance = 5
 
-                bicycle_length = 3.5
-                target_direction_angle = 1
-                lookahead_distance = 1
-
-                hipotenus = math.sqrt(math.pow(right_point_distance,2) + math.pow(left_point_distance,2))
-                lookahead_distance = hipotenus / 2
-                theta = math.degrees(math.atan(right_point_distance / left_point_distance))
-                target_direction_angle = 90 - 2 * theta
-
-                formula = ((2 * bicycle_length * math.sin(math.radians(target_direction_angle))) / lookahead_distance)
-                steering = (math.degrees(math.atan((formula)))) / 180
 
                 steering = fast_pp(right_point_distance, left_point_distance)
 
                 #pid method
-                #steering = -pid_controller.calculate(distances['left'] - distances['right'])
+                #steering = pid_controller.calculate(distances['left'] - distances['right'])
     
                 if steering < -.5:
                     steering = -.5
@@ -471,22 +512,41 @@ def lidar_data(veri_durak):
                 # doldur
                 mahmut.adc0 = int(AUTONOMOUS_SPEED)
                 mahmut.adc1 = int(angle)
-                mahmut.adc2 = 0
+                mahmut.adc2 = 0 + brake_value
                 mahmut.adc3 = FORWARD
                 mahmut.adc4 = True
-                mahmut.adc5 = int(driving_mode)
+                mahmut.adc5 = int(RPM_MODE)
             
             elif left_tracking == DORU:
                 #
                 #   CHECK THE DIRECTION
                 #
-                steering_angle = pid_controller.calculate(distances['left'] - SAG_FIXED)
-                angle = (steering_angle + 0.5) * 3600
+
+                right_point_distance = np.average(right_array)
+                left_point_distance = np.average(sol_array)
+
+                if(right_point_distance > 5):
+                    right_point_distance = 5
+
+                if(left_point_distance > 5):
+                    left_point_distance = 5
+
+                steering = fast_pp(SAG_FIXED, left_point_distance)
+
+                #pid method
+                #steering = pid_controller.calculate(distances['left'] - distances['right'])
+    
+                if steering < -.5:
+                    steering = -.5
+                elif steering > .5:
+                    steering = .5
+                
+                angle = potingen_straße(steering, POT_CENTER-1800)
 
                 # doldur
                 mahmut.adc0 = int(AUTONOMOUS_SPEED)
                 mahmut.adc1 = int(angle)
-                #mahmut.adc2 = 0
+                mahmut.adc2 = 0 + brake_value
                 mahmut.adc3 = FORWARD
                 mahmut.adc4 = True
                 mahmut.adc5 = int(driving_mode)
@@ -495,91 +555,97 @@ def lidar_data(veri_durak):
                 #
                 #   CHECK THE DIRECTION
                 #
-                steering_angle = pid_controller.calculate(SOL_FIXED - distances['right'])
-                angle = (steering_angle + 0.5) * 3600
+
+                right_point_distance = np.average(right_array)
+                left_point_distance = np.average(sol_array)
+
+                if(right_point_distance > 5):
+                    right_point_distance = 5
+
+                if(left_point_distance > 5):
+                    left_point_distance = 5
+
+                steering = fast_pp(right_point_distance, SOL_FIXED)
+
+                #pid method
+                #steering = pid_controller.calculate(distances['left'] - distances['right'])
+    
+                if steering < -.5:
+                    steering = -.5
+                elif steering > .5:
+                    steering = .5
+                
+                angle = potingen_straße(steering, POT_CENTER-1800)
 
                 # doldur
                 mahmut.adc0 = int(AUTONOMOUS_SPEED)
                 mahmut.adc1 = int(angle)
-                #mahmut.adc2 = 0
+                #mahmut.adc2 = 0 + brake_value
                 mahmut.adc3 = FORWARD
                 mahmut.adc4 = True
                 mahmut.adc5 = int(driving_mode)
 
             # <Parking Autonomous>
             elif is_parking_mode:
-                speed = AUTONOMOUS_SPEED
+                #@ZED değiştirilecek !!!!
+                parking_object.__current_pos = [zed_pose[0], zed_pose[1]] # anlık araç konumu
+                parking_object.__eval__()
+                
+                # left tracking
+                if not parking_object.__destiny:
+                    right_point_distance = np.average(right_array)
+                    left_point_distance = np.average(sol_array)
 
-                if (park_distance[YATAY] > 2):
-                    print("Two Third Takip")                
-                    if (twothird - park_coordinate) > 0:
-                        target_diff = (twothird - park_coordinate) / twothird
-                    else:
-                        target_diff = (twothird - park_coordinate) / (1280 - twothird)
+                    if(right_point_distance > 5):
+                        right_point_distance = 5
+                    if(left_point_distance > 5):
+                        left_point_distance = 5
+
+                    steering = fast_pp(SAG_FIXED, left_point_distance)
+        
+                    if steering < -.5:
+                        steering = -.5
+                    elif steering > .5:
+                        steering = .5                    
+                    angle = potingen_straße(steering, POT_CENTER-1800)
+
+                    mahmut.adc0 = int(0)
+                    mahmut.adc1 = int(angle)
+                    mahmut.adc2 = 0
+                    mahmut.adc3 = FORWARD
+                    mahmut.adc4 = True
+                    mahmut.adc5 = int(driving_mode)
+                
+                # face your destiny dear mahmut
                 else:
-                    print("Middle Takip")
-                    target_diff = (640 - park_coordinate) / 1280
-                
-                steer = (target_diff + 0.5) * 3600
+                    # stopping condition
+                    if distances['on'] < 1.5:
+                        mahmut.adc0 = int(0)
+                        mahmut.adc1 = int(1800)
+                        mahmut.adc2 = 11000
+                        mahmut.adc3 = FORWARD
+                        mahmut.adc4 = True
+                        mahmut.adc5 = int(driving_mode)
+                    
+                    elif distances['on'] < LABEL_OFFSET and parking_sign_current_distance < LABEL_OFFSET
+                        print("Middle Takipppp")
+                        target_diff = (640 - park_coordinate) / 1280
+                        steer = (target_diff + 0.5) * 3600
 
-                #test
-                print("yatay", park_distance[YATAY])
-                print("dikey", park_distance[DIKEY])
-                
-                if distances['on'] < 1 and speed_odometry >= 0:
-                    speed = 0
-                    regen = 1000
-                    # brake
-
-                # </Parking Autonomous>
-
-                mahmut.adc0 = int(speed)
-                mahmut.adc1 = int(steer)
-                #mahmut.adc2 = 0
-                mahmut.adc3 = FORWARD
-                mahmut.adc4 = True
-                mahmut.adc5 = int(driving_mode)
-                
-
-            #############################################
-            elif is_curve_parking:
-                speed = AUTONOMOUS_SPEED
-
-                if park.is_that_point(closest_point, [zed_x, zed_y]):
-                    closest_point = park.choose_closest_point([zed_x,zed_y])
-
-                bicycle_length = 3.5
-                target_direction_angle = 1
-                lookahead_distance = 1
-
-                distance = math.sqrt(math.pow(closest_point[0]-zed_x,2) + math.pow(closest_point[1]-zed_y,2))
-                lookahead_distance = distance 
-                
-                theta =  park.point2pointAngle(closest_point,[zed_x,zed_y])
-                target_direction_angle = 90 - theta
-
-                formula = ((2 * bicycle_length * math.sin(math.radians(target_direction_angle))) / lookahead_distance)
-                steering = (math.degrees(math.atan((formula)))) / 180
-                
-                print("steering")
-                print(steering)
-
-                if steering < -.5:
-                    steering = -.5
-                elif steering > .5:
-                    steering = .5
-
-                mahmut.adc0 = int(speed)
-                mahmut.adc1 = int(steering)
-                #mahmut.adc2 = 0
-                mahmut.adc3 = FORWARD
-                mahmut.adc4 = True
-                mahmut.adc5 = int(driving_mode)
-            #############################################
-
-            elif is_durak_mode:
-                pass
-            
+                        mahmut.adc0 = int(AUTONOMOUS_SPEED)
+                        mahmut.adc1 = int(steer)
+                        mahmut.adc2 = 0
+                        mahmut.adc3 = FORWARD
+                        mahmut.adc4 = True
+                        mahmut.adc5 = int(driving_mode)
+                    # maneuver mode
+                    else:
+                        mahmut.adc0 = int(AUTONOMOUS_SPEED)
+                        mahmut.adc1 = int(FULL_RIGHT) # ölümüne sağ
+                        mahmut.adc2 = 0
+                        mahmut.adc3 = FORWARD
+                        mahmut.adc4 = True
+                        mahmut.adc5 = int(driving_mode)
             #
             #   LOGGER
             # 
@@ -608,16 +674,18 @@ def lidar_data(veri_durak):
             pid_controller.pidError = 0
             steering_angle = (l_left_right+1)*1800  # 0 3600
 
-            if not CRUISE_CONTROL and driving_mode == CURRENT_MODE:
+            #if not CRUISE_CONTROL and driving_mode == CURRENT_MODE:
+            if driving_mode == CURRENT_MODE:
                 speed = mapper(right_trigger, 1, -1, 0, 1000)
-            elif not CRUISE_CONTROL and driving_mode == RPM_MODE:
+            #elif not CRUISE_CONTROL and driving_mode == RPM_MODE:
+            elif driving_mode == RPM_MODE:
                 speed = mapper(right_trigger, 1, -1, 0, MAX_RPM_MODE_SPEED)            
             
             regen = mapper(left_trigger, 1, -1, 0, 1000)
 
             mahmut.adc0 = int(speed)           # speed (0, 1000)
             mahmut.adc1 = int(steering_angle)  # steering angle (0, 3600)
-            mahmut.adc2 = int(regen)           # regen (0, 1000)
+            mahmut.adc2 = int(regen + brake_value)           # regen (0, 1000)
             mahmut.adc3 = int(GEAR)            # 
             mahmut.adc4 = int(AUTONOMOUS)      # autonomous
             mahmut.adc5 = int(driving_mode)    # mode
@@ -656,7 +724,7 @@ def lidar_data(veri_durak):
     elif driving_mode == 0:
         print("Driving Mode: CURRENT")
     else:
-        print("Sen şu an bir şeyleri yedin")
+        print(bcolors.FAIL + "404 FATAL ERROR" + bcolors.ENDC)
 
     print("sag uzaklık:", np.average(right_array))
     print("sol uzaklık:", np.average(sol_array))
@@ -664,39 +732,40 @@ def lidar_data(veri_durak):
     control_mahmut(mahmut)
     arduino.publish(mahmut)
 
-"""
-    AXIS:
-        0:  Left Right Stick Left
-        1:  Up   Down  Stick Left
-        2:  LT  (_start:=1, _end:=-1)
-        3:  Left Right Stick Right
-        4:  Up   Down  Stick Right
-        5:  RT  (_start:=1, _end:=-1)
-        6:  CrossKey (_left:= 1, _right:= -1)
-        7:  CrossKey (_up:= 1, _down:= -1)
 
-    BUTTON:
-        0:  A
-        1:  B
-        2:  X
-        3:  Y
-        4:  LB
-        5:  RB
-        6:  BACK
-        7:  START
-        8:  LOGITECH BUTTON
-        9:  BUTTON STICK LEFT
-        10: BUTTON STICK RIGHT
-"""
 
 def F1_2020(russell):
     """
-        rosrun joy joy_node
+        AXIS:
+            0:  Left Right Stick Left
+            1:  Up   Down  Stick Left
+            2:  LT  (_start:=1, _end:=-1)
+            3:  Left Right Stick Right
+            4:  Up   Down  Stick Right
+            5:  RT  (_start:=1, _end:=-1)
+            6:  CrossKey (_left:= 1, _right:= -1)
+            7:  CrossKey (_up:= 1, _down:= -1)
+
+        BUTTON:
+            0:  A
+            1:  B
+            2:  X
+            3:  Y
+            4:  LB
+            5:  RB
+            6:  BACK
+            7:  START
+            8:  LOGITECH BUTTON
+            9:  BUTTON STICK LEFT
+            10: BUTTON STICK RIGHT
     """
+
     global YAVIZ
     global SEKO
     global TERMINATOR
     global speed
+    global brake
+    global brake_value
     global AUTONOMOUS
     global AUTONOMOUS_SPEED
     global REVERSE
@@ -746,7 +815,6 @@ def F1_2020(russell):
         TERMINATOR ^= True
         YAVIZ = SEKO = False
 
-
     # ABXY Buttons
     BUTTON_A = russell.buttons[0]
     BUTTON_B = russell.buttons[1]
@@ -762,7 +830,6 @@ def F1_2020(russell):
     BUTTON_STICK_LEFT = russell.buttons[9]
     BUTTON_STICK_RIGHT = russell.buttons[10]
 
-    
     if TERMINATOR:
         #
         # DON'T TOUCH
@@ -778,57 +845,61 @@ def F1_2020(russell):
         # SECURITY !!!
         #
 
-        # triggers
-        if (YAVIZ == True) and (SEKO == True):
+        # trigger safety
+        left_trigger = 1
+        right_trigger = 1
+
+        if YAVIZ and SEKO:
             left_trigger = russell.axes[2]
             right_trigger = russell.axes[5]
-        else:
-            # (1, -1) => (0, max_speed)
-            left_trigger = 1
-            right_trigger = 1
-        
-        if YAVIZ and SEKO and BUTTON_BACK:
-            CRUISE_CONTROL ^= True
-            cruiseSpeed = 50
+            
+            # A B X Y #
+            if BUTTON_Y:
+                AUTONOMOUS ^= True
+            if BUTTON_A:
+                driving_mode ^= True
+            if BUTTON_B:
+                brake ^= True
+                #collecting_data ^= True
+            if BUTTON_X and right_trigger == 1 and speed == 0:
+                GEAR = next(gear_generator)
+            
+            if BUTTON_BACK:
+                CRUISE_CONTROL ^= True
+                if CRUISE_CONTROL == False: speed = 0
+            
+            if BUTTON_LB:
+                if AUTONOMOUS:
+                    if AUTONOMOUS_SPEED != 0:
+                        AUTONOMOUS_SPEED -= 25
+                elif CRUISE_CONTROL:
+                    if speed != 0:
+                        speed -= 25
+                else:
+                    ...
+            
+            if BUTTON_RB:
+                if AUTONOMOUS:
+                    if AUTONOMOUS_SPEED < 100:
+                        AUTONOMOUS_SPEED += 25
+                elif CRUISE_CONTROL:
+                    if speed < 200:
+                        speed += 25
+                else:
+                    ...
+            
+            if BUTTON_STICK_RIGHT:
+                is_curve_parking ^= True
 
-        if BUTTON_Y:
-            AUTONOMOUS ^= True
-        if BUTTON_X and right_trigger == 1 and speed == 0:
-            GEAR = next(gear_generator)
-        if BUTTON_A:
-            driving_mode ^= True
-        if BUTTON_B:
-            collecting_data ^= True
-        
-        if BUTTON_LB:
-            if AUTONOMOUS:
-                AUTONOMOUS_SPEED -= 25
-            elif CRUISE_CONTROL:
-                speed -= 25
-            else:
-                ...
-        if BUTTON_RB:
-            if AUTONOMOUS:
-                AUTONOMOUS_SPEED += 25
-            elif CRUISE_CONTROL:
-                speed += 25
-            else:
-                ...
-        if BUTTON_STICK_RIGHT:
-            is_curve_parking ^= True
-            mid_tracking ^= True
-"""
-<PARK CALLBACKS>
-"""
 
-
-SOL = 0
-ORTA = 1
-SAG = 2
-# String data
-# @sikinti
 def yolo_callback(data):
+    global AUTONOMOUS_SPEED
+    global AUTONOMOUS_SPEED_RECOVERY
+    global CRITICAL_PARKING_DISTANCE
+    global CALCULATE_PARKING_SIGN_DISTANCE
     global speed
+    global brake
+    global brake_value
     global state
     global is_parking_mode
     global kararVerici
@@ -840,25 +911,47 @@ def yolo_callback(data):
     global first_stop_counter
     global first_stop
     
-    #state = data.data
+    global zed_x
+    global zed_y
 
-    #tabela1,distance1;tabela2,distance2
-    
-    if data.data != " 0":
+    global is_curve_created
+    global closest_point
+
+    global recently_stopped
+    global orhandaldal
+    global roswtf
+
+    global parking_object
+    global locked_on_target
+    global parking_sign_current_distance
+
+    if roswtf:
+        mahmut.adc0 = 0
+        mahmut.adc2 = 11000
+        arduino.publish(mahmut)
+    elif data.data != "":
         datas = data.data.split(';')
-
-        imitasyon_sol = None
-        imitasyon_sag = None
-        imitasyon_ort = None
+        datas.remove('')
 
         r_u_sure = False
-
         for tabela in datas:
-            label, distance = tabela.split(',')
-            #########################pARk###########################
-            if label == "Park Yeri" and distance < 10:
-                #is_parking_mode = True
-                pass
+            label, x, y, z, distance = tabela.split(',')
+            x = float(x)
+            y = float(y)
+            z = float(z)
+            distance = float(distance)
+
+            ######################### PARK ###########################
+            if label == "Park Yeri" and distance < CALCULATE_PARKING_SIGN_DISTANCE and not locked_on_target:
+                #@ZED değiştirilecek !!!!
+                parking_object.__target = 31, 31 # hedef tabelanın koordinatlarını belirle!
+                locked_on_target = True
+                break
+
+            elif label in ("Park Yeri", "Park Yapilmaz") and distance < CRITICAL_PARKING_DISTANCE:
+                is_parking_mode = True
+                break
+                
             elif label == "Park Yapilmaz" and distance < 15:
                 left_tracking = True
                 right_tracking = False
@@ -866,47 +959,45 @@ def yolo_callback(data):
             ###############################################################
             
             elif label == "sola donulmez":
-                kararVerici[SOL]  = None
-                kararVerici[SAG]  = None
-                kararVerici[ORTA]  = None
+                kararVerici[SOL]  = -1
+                kararVerici[SAG]  = -1
+                kararVerici[ORTA]  = -1
             elif label == "saga donulmez":
-                kararVerici[SOL]  = None
-                kararVerici[SAG]  = None
-                kararVerici[ORTA]  = None
-            elif label == "Girilmez":
-                kararVerici[SOL]  = None
-                kararVerici[SAG]  = None
-                kararVerici[ORTA]  = None
+                pass # UNUTMA 
+                kararVerici[SOL]  = -1
+                kararVerici[SAG]  = -1
+                kararVerici[ORTA]  = -1
+            elif label == "Girilmez" and distance < 4.5:
+                mid_tracking = False
+                right_tracking = True
+                left_tracking = False
             ###############################################################
             elif label == "ileriden sola mecburi yon" and distance < 3.5:
                 left_tracking = True
                 right_tracking = False
                 mid_tracking = False
+                r_u_sure = True
                 break
             elif label == "ileriden saga mecburi yon" and distance < 3.5:
                 left_tracking = False
                 right_tracking = True
                 mid_tracking = False
+                r_u_sure = True
                 break
             ###############################################################
-            elif label == "Durak" and distance < 2.5:
-                first_stop = True
-                
-                if first_stop_counter > 30:
-                    started_moving_first = True
-                r_u_sure = True
-                continue
+            elif label == "Durak" and distance < 4. and not recently_stopped:
+                roswtf = True
+                brake = True
+                recently_stopped = True
+
             ###############################################################
             elif label == "yesil isik":
                 speed = AUTONOMOUS_SPEED
                 regen = 0
-                r_u_sure = True
-                continue
             elif label == "kirmizi isik" and distance < 2.0:
                 speed = 0
                 regen = 1000
                 r_u_sure = True
-                continue
             ###############################################################
             elif label == "Sola Mecburi Yön" and distance < 3.5:
                 left_tracking = True
@@ -919,33 +1010,30 @@ def yolo_callback(data):
                 mid_tracking = False
                 break
             else:
-                right_tracking = False
-                left_tracking = False
-                mid_tracking = True
-        
+                pass
 
-# String data
 def park_coordinate_callback(park_data):
     global park_coordinate
-    if park_data.data=='None':
-        park_coordinate='None'
+    if park_data.data=='0':
+        pass
     else:
         park_coordinate = float(park_data.data)
 
 
 # Point(x, y, z) data
 def park_distance_callback(data):
+    global park_distance
     park_distance[0] = abs(data.z)
     park_distance[1] = abs(data.y)
 
 def zed_pose(data):
+    global zed_x
+    global zed_y
+
     zed_x = data.z
     zed_y = data.x
-"""
-</PARK CALLBACKS>
-"""
 
-""" Keyboard """
+# Keyboard #
 def on_press(key):
     global mahmut
     global hiz
@@ -980,7 +1068,7 @@ def on_release(key):
         direk = 1800
     elif(key == Key.right):
         direk = 1800
-""" /Keyboard """
+#*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*#
 
 """
 <Ardu Odom>
@@ -1013,51 +1101,54 @@ def fast_pp(right_point_distance, left_point_distance, bicycle_length = BICYCLE_
     return math.degrees(math.atan(formula)) / 180
 
 if __name__ == "__main__":
+    # this node #
+    rospy.init_node('mahmut',anonymous=True)
+
+    # saving data
     file = open("çöp.csv", "a+")
     writer = csv.writer(file)
     writer.writerow(["SOL", "SAG", "DIREKSIYON"])
 
-    # just in time compiler #
-    potingen_straße(31, 31)
-    ackermann(31, 31, 31)
-    fast_pp(31, 31)
+    # steering angle #
+    pid_controller = Steering_Algorithms.PID(0.8, 0.0075, 0.225)
+    pürşit = Steering_Algorithms.Pure_Pursuit_Controller(5, 5, 1)
 
-    rospy.init_node('mahmut',anonymous=True)
+    # just in time compiler #
+    print(potingen_straße(31, 31))
+    print(ackermann(31, 31, 31))
+    print(fast_pp(31, 31))
+    print(fast_pid(31,31,31,31,31,31))
+    # safety #
+    AUTONOMOUS_SPEED -= (AUTONOMOUS_SPEED % 25)
+    
+    # subscribers
     rospy.Subscriber('/scan', LaserScan, lidar_data, queue_size=10)
     rospy.Subscriber('/joy', Joy, F1_2020, queue_size=10)
     rospy.Subscriber('/pot_topic', Adc, haydi_gel_icelim, queue_size=10)
     rospy.Subscriber('yolo_park', String, park_coordinate_callback, queue_size=10)
-    rospy.Subscriber('/zed_yolo_raw_distance', String, yolo_callback, queue_size=10)
+    rospy.Subscriber('/zed_detections', String, yolo_callback, queue_size=10)
     rospy.Subscriber('zed_yolo_sign_coord', Point, park_distance_callback, queue_size=10)
     rospy.Subscriber('zed_yolo_pose',Point,zed_pose,queue_size = 10)
-
+    # publishers
     arduino = rospy.Publisher("/seko", Adc, queue_size=10, latch=True)
     lcd = rospy.Publisher("/screen", Adc, queue_size=10, latch=True)
 
+    # rosmsg #
     f710 = Joy()
     mahmut = Adc()
+    park = serhatos()
+
+    # Parking #
+    parking_object = park_seko(ACKERMAN_RADIUS, LABEL_OFFSET, ERROR_ACCEPTANCE)
 
     # driving with keyboard    
     hiz = 0
     direk = 1800
     keyboard_listener = Listener(on_press=on_press, on_release=on_release)
     #keyboard_listener.start()
-
-
-    pid_controller = Steering_Algorithms.PID(0.8, 0.0075, 0.225)
-    pürşit = Steering_Algorithms.Pure_Pursuit_Controller(5, 5, 1)
-    park = Parking()
-
-    #x_coords = [0,park_distance[0],park_distance[0]]
-    #y_coords = [0,park_distance[1],park_distance[1]]
-
-    #denk_coef = park.find_curve(x_coords,y_coords,2)
-    #park.find_all_point_on_the_curve(denk_coef,park_distance[0],park_distance[1])
-    #closest_point = park.choose_closest_point(zed_x,zed_y)
     
     while not rospy.is_shutdown():
         rospy.spin()
 
     file.close()
-
 
