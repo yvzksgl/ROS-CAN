@@ -19,20 +19,18 @@ import numpy as np
 from numba import float32 as f32
 from  matplotlib import pyplot as plt
 from  rosserial_arduino.msg import Adc
-from  std_msgs.msg import Float32, String
-from  itertools import cycle, filterfalse
+from  std_msgs.msg import String
+from  itertools import cycle
 from  sensor_msgs.msg import LaserScan, Joy
 from  numpy.lib.function_base import average
-from  geometry_msgs.msg import Vector3, Point
-from  pynput.keyboard import Key, Listener, GlobalHotKeys
+from  geometry_msgs.msg import Point
+from  pynput.keyboard import Key, Listener
 
 np.seterr('raise')
-
 
 # global variables #
 speed = 0
 regen = 0
-state = ""
 steering_angle = 1800
 speed_odometry = 0
 brake_speed = 0
@@ -43,7 +41,7 @@ collecting_data = False
 SOL = 0
 ORTA = 1
 SAG = 2 
-AUTONOMOUS_SPEED = 25 # never change this variable randomly!!!
+AUTONOMOUS_SPEED = 31 # never change this variable randomly!!!
 AUTONOMOUS_SPEED_RECOVERY = AUTONOMOUS_SPEED
 POT_CENTER = 1800
 MAX_RPM_MODE_SPEED = 200
@@ -52,8 +50,8 @@ CURRENT_MODE = 0
 driving_mode = RPM_MODE
 DORU = (1 == 1)
 left_tracking = False
-right_tracking = False
-mid_tracking = True
+right_tracking = True
+mid_tracking = False
 NEUTRAL = 0
 FORWARD = 1
 REVERSE = 2
@@ -62,15 +60,24 @@ CAR_LENGTH = 2.25
 CURRENT    = 0
 BUS_VOLTAGE = 0
 BICYCLE_LENGTH = 3.5
-SOL_FIXED = 2
-SAG_FIXED = 2
+SOL_FIXED = 2.31
+SAG_FIXED = 2.31
 kararVerici = np.array([0, 1, 0])
 recently_stopped = False
+recently_stopped_kirmizi = False
 orhandaldal = np.inf
+mahmut_tuncer = np.inf
 brake = False
 brake_value = 0
 roswtf = False
-FULL_RIGHT = 3600
+FULL_RIGHT = 0
+FULL_LEFT = 3600
+left_point_distance = 0
+right_point_distance = 0
+karar_verici_yakın_zamanda_calisti = False
+kirmizida_dur_lan = False
+ahaburasıdaboşmuşıheahıeah = False
+olceriz_sıkıntı_yog = np.inf
 
 # durak experimental #
 first_stop_counter = False
@@ -143,11 +150,10 @@ zed_y = None
 denk_coef = None
 closest_point = None
 is_curve_created = False
-CRITICAL_PARKING_DISTANCE = 20
-CALCULATE_PARKING_SIGN_DISTANCE = 15
+CRITICAL_PARKING_DISTANCE = 10
+CALCULATE_PARKING_SIGN_DISTANCE = 10
 locked_on_target = False
 parking_sign_current_distance = None
-
 
 ACKERMAN_RADIUS = 4
 LABEL_OFFSET = 9.
@@ -277,7 +283,7 @@ class Steering_Algorithms:
     Stay Away
 """
 class park_seko(object):
-    def __init__(self, ackermann_radius, label_offset, error_acceptance = 0.5)
+    def __init__(self, ackermann_radius, label_offset, error_acceptance = 0.5):
         self.__target = []
         self.__margin = np.inf
         self.__destiny = False
@@ -289,20 +295,14 @@ class park_seko(object):
     def __eval__(self):
         # offset x mi y mi kontrol et
         #@ZED değiştirilecek!
-        ackermann_target_x = __target[0] - ACKERMAN_RADIUS - LABEL_OFFSET # +- değişebilir
-        ackermann_target_y = __target[1] - ACKERMAN_RADIUS # +- değişebilir
-        xd = math.pow(ackermann_target_x - __current_pos[0], 2)
-        yd = math.pow(ackermann_target_y - __current_pos[1], 2)
+        ackermann_target_x = self.__target[0] - ACKERMAN_RADIUS - LABEL_OFFSET # @!!!
+        ackermann_target_y = self.__target[1] - ACKERMAN_RADIUS # @!!!
+        xd = math.pow(ackermann_target_x - self.__current_pos[0], 2)
+        yd = math.pow(ackermann_target_y - self.__current_pos[1], 2)
         self.__margin = math.sqrt(xd + yd)
         
         if self.__margin < self.__error_acceptance:
             self.__destiny = True
-            
-    @staticmethod
-    @numba.jit(f32(f32, f32, f32, f32), nopython=True, cache=True, fastmath=True)
-    def __f__(tx, ty, cx, cy):
-        #experimental, for future#
-        pass
 
 
 class serhatos(object):
@@ -322,7 +322,7 @@ class serhatos(object):
                 tot += (x **i) * j
             all_y[a] = tot
         for i, j in zip(all_x,all_y):
-            self.CP.append(CurvePoint(i, j))
+            #self.CP.append(CurvePoint(i, j))
             print(i, j)
     def choose_closest_point(self, x, y):
         min_error = np.inf
@@ -362,7 +362,6 @@ class serhatos(object):
 def lidar_data(veri_durak):
     global speed 
     global regen
-    global state
     global steering_angle
     global is_parking_mode
     global is_durak_mode
@@ -397,19 +396,54 @@ def lidar_data(veri_durak):
     global brake_value
     global roswtf
     global orhandaldal
-
+    global recently_stopped_kirmizi
+    global mahmut_tuncer
     global parking_sign_current_distance
+    global right_point_distance
+    global left_point_distance
+    global kirmizida_dur_lan
+    global karar_verici_yakın_zamanda_calisti
+    global ahaburasıdaboşmuşıheahıeah
+    global olceriz_sıkıntı_yog
+    global sol_array
+    global right_array
 
-    sol_laser = np.array(veri_durak.ranges[0:369], dtype=np.float32)
-    sag_laser = np.array(veri_durak.ranges[1079:1439], dtype=np.float32)
+    #sol_laser = np.array(veri_durak.ranges[0:369], dtype=np.float32)
+    #sag_laser = np.array(veri_durak.ranges[1079:1439], dtype=np.float32)
     
-    sol_laser[sol_laser>25] = 25
-    sag_laser[sag_laser>25] = 25
+    #sol_laser[sol_laser>25] = 25
+    #sag_laser[sag_laser>25] = 25
 
-    if brake:
-        brake_value = 10000
-    else:
-        brake_value = 0
+
+    if ahaburasıdaboşmuşıheahıeah:
+        # TUNE ET LAN 
+        """ 
+        while olceriz_sıkıntı_yog + 3 > time.time():
+            mahmut.adc0 = AUTONOMOUS_SPEED
+            mahmut.adc1 = 1800
+            mahmut.adc2 = 0
+            mahmut.adc3 = FORWARD
+            mahmut.adc4 = True
+            mahmut.adc5 = driving_mode 
+        """
+        while olceriz_sıkıntı_yog + 3 > time.time():
+            zol = np.array(veri_durak.ranges[560:672])
+            zag = np.array(veri_durak.ranges[224:336])
+
+            solumsu = zol[zol > 2.5] = 2.5
+            sagimsi = zag[zag > 2.5] = 2.5
+
+            xd = fast_pp(average(sagimsi), average(solumsu))
+            
+            mahmut.adc0 = AUTONOMOUS_SPEED
+            mahmut.adc1 = xd
+            mahmut.adc2 = 0
+            mahmut.adc3 = FORWARD
+            mahmut.adc4 = True
+            mahmut.adc5 = driving_mode
+        
+        ahaburasıdaboşmuşıheahıeah = False
+
 
     """
     if roswtf:
@@ -429,16 +463,28 @@ def lidar_data(veri_durak):
         print(bcolors.WARNING+"BBBBBB!"+bcolors.ENDC)
     """
 
+    if orhandaldal + 15 < time.time():
+        recently_stopped = False
+
     if roswtf:
-        mahmut.adc0 = 0
-        mahmut.adc2 = 11000
-        arduino.publish(mahmut)
-        AUTONOMOUS_SPEED = AUTONOMOUS_SPEED_RECOVERY
-        print(bcolors.WARNING+"Hoş geldiğiz!"+bcolors.ENDC)
-        rospy.sleep(10)
-        roswtf = False
+        print(bcolors.WARNING+"DURAK START"+bcolors.ENDC)
+        start = time.time()
+
+        while time.time() < start + 10:
+            mahmut.adc0 = 0
+            mahmut.adc1 = 1800
+            mahmut.adc2 = 11000
+            mahmut.adc3 = FORWARD
+            mahmut.adc4 = True
+            mahmut.adc5 = driving_mode
+            arduino.publish(mahmut)
+            qoıwheqdw = round(time.time() - start, 2)
+            print(f"{qoıwheqdw} saniyedir DURAKTAYIZZZZ")
+            time.sleep(1/20)
+
         orhandaldal = time.time()
-        print(bcolors.WARNING+"BBBBBB!"+bcolors.ENDC)
+        roswtf = False
+        print(bcolors.WARNING+"DURAK FINISH!"+bcolors.ENDC)
 
     if collecting_data:
         writer.writerow([sol_laser, sag_laser, arduino_odometry['steering_angle']])
@@ -455,13 +501,13 @@ def lidar_data(veri_durak):
     sag_y = np.array(veri_durak.ranges[1140:1200])
     sag_z = np.array(veri_durak.ranges[1200:1260]) """
 
-    on_array = np.array(np.concatenate((veri_durak.ranges[0:20], np.array(veri_durak.ranges[1419:1439]))))
+    on_array = np.array(veri_durak.ranges[440:456])
 
     #sol_array = (sol_x * 5 + 3 * sol_y + sol_z) / 9
     #right_array = (sag_x * 5 + 3 * sag_y + sag_z) / 9
 
-    sol_array = np.array(veri_durak.ranges[320:360])
-    right_array = np.array(veri_durak.ranges[1020:1080])
+    sol_array = np.array(veri_durak.ranges[560:672])
+    right_array = np.array(veri_durak.ranges[224:336])
 
     sol_array[sol_array > 5] = 5
     right_array[right_array > 5] = 5
@@ -472,15 +518,21 @@ def lidar_data(veri_durak):
         'on' : np.average(on_array)
     }
     
-    if recently_stopped and (time.time() - orhandaldal > 10.0):
-        recently_stopped = False
-
     if TERMINATOR:
         if AUTONOMOUS:
             print(bcolors.WARNING + "AUTONOMOUS" + bcolors.ENDC)
             driving_mode = RPM_MODE
             # Normal Autonomous
-            if mid_tracking == True:
+
+            if kirmizida_dur_lan:
+                mahmut.adc0 = 0
+                mahmut.adc1 = 1800
+                mahmut.adc2 = 11000
+                mahmut.adc3 = FORWARD
+                mahmut.adc4 = True
+                mahmut.adc5 = driving_mode
+
+            elif mid_tracking == True:
                 print(bcolors.FAIL + "MID_TRACKING" + bcolors.ENDC)
                 #
                 #   CHECK THE DIRECTION
@@ -495,7 +547,8 @@ def lidar_data(veri_durak):
                 if(left_point_distance > 5):
                     left_point_distance = 5
 
-
+                print("r", right_point_distance)
+                print("l", left_point_distance)
                 steering = fast_pp(right_point_distance, left_point_distance)
 
                 #pid method
@@ -518,7 +571,7 @@ def lidar_data(veri_durak):
                 mahmut.adc5 = int(RPM_MODE)
             
             elif left_tracking == DORU:
-                #
+                print(bcolors.FAIL + "LEFT_TRACKING" + bcolors.ENDC)    #
                 #   CHECK THE DIRECTION
                 #
 
@@ -552,7 +605,7 @@ def lidar_data(veri_durak):
                 mahmut.adc5 = int(driving_mode)
 
             elif right_tracking == DORU:
-                #
+                print(bcolors.FAIL + "RIGHT_TRACKING" + bcolors.ENDC)
                 #   CHECK THE DIRECTION
                 #
 
@@ -580,7 +633,7 @@ def lidar_data(veri_durak):
                 # doldur
                 mahmut.adc0 = int(AUTONOMOUS_SPEED)
                 mahmut.adc1 = int(angle)
-                #mahmut.adc2 = 0 + brake_value
+                mahmut.adc2 = 0 + brake_value
                 mahmut.adc3 = FORWARD
                 mahmut.adc4 = True
                 mahmut.adc5 = int(driving_mode)
@@ -606,7 +659,8 @@ def lidar_data(veri_durak):
                     if steering < -.5:
                         steering = -.5
                     elif steering > .5:
-                        steering = .5                    
+                        steering = .5
+
                     angle = potingen_straße(steering, POT_CENTER-1800)
 
                     mahmut.adc0 = int(0)
@@ -627,7 +681,7 @@ def lidar_data(veri_durak):
                         mahmut.adc4 = True
                         mahmut.adc5 = int(driving_mode)
                     
-                    elif distances['on'] < LABEL_OFFSET and parking_sign_current_distance < LABEL_OFFSET
+                    elif distances['on'] < LABEL_OFFSET and parking_sign_current_distance < LABEL_OFFSET:
                         print("Middle Takipppp")
                         target_diff = (640 - park_coordinate) / 1280
                         steer = (target_diff + 0.5) * 3600
@@ -789,18 +843,16 @@ def F1_2020(russell):
     global BUTTON_START
     global BUTTON_STICK_LEFT
     global BUTTON_STICK_RIGHT
-
     global is_parking_mode
     global is_curve_parking
-
     global left_tracking
     global right_tracking
     global mid_tracking
     global driving_mode
     global brake_motor_direction
-
     global collecting_data
     global CRUISE_CONTROL
+
 
     # left strick
     l_left_right = russell.axes[0]
@@ -860,6 +912,10 @@ def F1_2020(russell):
                 driving_mode ^= True
             if BUTTON_B:
                 brake ^= True
+                if brake:
+                    brake_value = 0
+                else:
+                    brake_value = 10000
                 #collecting_data ^= True
             if BUTTON_X and right_trigger == 1 and speed == 0:
                 GEAR = next(gear_generator)
@@ -900,118 +956,187 @@ def yolo_callback(data):
     global speed
     global brake
     global brake_value
-    global state
     global is_parking_mode
     global kararVerici
     global left_tracking
     global right_tracking
     global mid_tracking
-
-    #durak
     global first_stop_counter
     global first_stop
-    
     global zed_x
     global zed_y
-
     global is_curve_created
     global closest_point
-
     global recently_stopped
     global orhandaldal
     global roswtf
-
     global parking_object
     global locked_on_target
     global parking_sign_current_distance
+    global recently_stopped_kirmizi
+    global left_point_distance
+    global right_point_distance
+    global kirmizida_dur_lan
+    global karar_verici_yakın_zamanda_calisti
+    global ahaburasıdaboşmuşıheahıeah
+    global olceriz_sıkıntı_yog
+    global sol_array
+    global right_array
 
-    if roswtf:
-        mahmut.adc0 = 0
-        mahmut.adc2 = 11000
-        arduino.publish(mahmut)
-    elif data.data != "":
+    sola_donulmez_goruldu = False
+    saga_donulmez_goruldu = False
+    girilmez_goruldu = False
+
+    if data.data != "":
         datas = data.data.split(';')
         datas.remove('')
+        
+        kirmizi_hattori = False
+        durak_hanzo = False
+
+        for tabela in datas:
+            label, _, _, _, distance = tabela.split(',')
+
+            if label == "kirmizi isik" and float(distance) < 6.75 and distance > 2.5:
+                kirmizi_hattori = True  
+            elif label == "Durak" and float(distance) < 6.75 and float(distance) > 2.5 and not recently_stopped:
+                durak_hanzo = True
+                print("durak girdi")
+
+        if kirmizi_hattori:
+            kirmizida_dur_lan = True
+            return
+        elif durak_hanzo:
+            print("durak hanzo")
+            roswtf = True
+            recently_stopped = True
+            return      
+            
+        sola_donulmez_goruldu = False
+        saga_donulmez_goruldu = False
+        girilmez_goruldu = False
 
         r_u_sure = False
+
         for tabela in datas:
             label, x, y, z, distance = tabela.split(',')
+            
             x = float(x)
             y = float(y)
-            z = float(z)
-            distance = float(distance)
 
-            ######################### PARK ###########################
-            if label == "Park Yeri" and distance < CALCULATE_PARKING_SIGN_DISTANCE and not locked_on_target:
+            distance = float(distance)
+            
+            ##################################################################################################
+            ##################################################################################################
+            ###################################################################################################
+            ###################################################################################################
+            ##################################################################################################            
+            if label == "yesil isik":
+                kirmizida_dur_lan = False
+            elif label == "Park Yeri" and distance < CALCULATE_PARKING_SIGN_DISTANCE and not locked_on_target:
                 #@ZED değiştirilecek !!!!
-                parking_object.__target = 31, 31 # hedef tabelanın koordinatlarını belirle!
+                parking_object.__target = [x, y] # hedef tabelanın koordinatlarını belirle!
                 locked_on_target = True
                 break
 
             elif label in ("Park Yeri", "Park Yapilmaz") and distance < CRITICAL_PARKING_DISTANCE:
                 is_parking_mode = True
                 break
-                
-            elif label == "Park Yapilmaz" and distance < 15:
-                left_tracking = True
-                right_tracking = False
-                mid_tracking = False
+            ###################################################################################################
+            ###################################################################################################
+            ###################################################################################################
+            ###################################################################################################
+            ###################################################################################################
+            elif label == "sola donulmez" and distance < 8. and distance > 6:
+                sola_donulmez_goruldu = True
+            elif label == "saga donulmez" and distance < 8. and distance > 6:
+                saga_donulmez_goruldu = True
+            elif label == "Girilmez" and distance < 8. and distance > 6:
+                girilmez_goruldu = True
             ###############################################################
-            
-            elif label == "sola donulmez":
-                kararVerici[SOL]  = -1
-                kararVerici[SAG]  = -1
-                kararVerici[ORTA]  = -1
-            elif label == "saga donulmez":
-                pass # UNUTMA 
-                kararVerici[SOL]  = -1
-                kararVerici[SAG]  = -1
-                kararVerici[ORTA]  = -1
-            elif label == "Girilmez" and distance < 4.5:
-                mid_tracking = False
-                right_tracking = True
-                left_tracking = False
-            ###############################################################
-            elif label == "ileriden sola mecburi yon" and distance < 3.5:
+            elif label == "ileriden sola mecburi yon" and distance < 8. and distance > 6:
                 left_tracking = True
                 right_tracking = False
                 mid_tracking = False
                 r_u_sure = True
-                break
-            elif label == "ileriden saga mecburi yon" and distance < 3.5:
+            elif label == "ileriden saga mecburi yon" and distance < 8. and distance > 6:
                 left_tracking = False
                 right_tracking = True
                 mid_tracking = False
                 r_u_sure = True
-                break
             ###############################################################
-            elif label == "Durak" and distance < 4. and not recently_stopped:
-                roswtf = True
-                brake = True
-                recently_stopped = True
-
-            ###############################################################
-            elif label == "yesil isik":
-                speed = AUTONOMOUS_SPEED
-                regen = 0
-            elif label == "kirmizi isik" and distance < 2.0:
-                speed = 0
-                regen = 1000
+            elif label == "ileri Ve saga mecburi yon" and distance < 8. and distance > 6:
+                left_tracking = False
+                right_tracking = True
+                mid_tracking = False
                 r_u_sure = True
-            ###############################################################
-            elif label == "Sola Mecburi Yön" and distance < 3.5:
-                left_tracking = True
+            elif label == "ileri Ve sola mecburi yon" and distance < 8. and distance > 6:
                 right_tracking = False
+                left_tracking = True
                 mid_tracking = False
-                break
-            elif label == "Saga Mecburi Yön" and distance < 3.5:
-                right_tracking = True
-                left_tracking = False
-                mid_tracking = False
-                break
+                r_u_sure = True
             else:
                 pass
-
+        
+        if not r_u_sure:
+            if sola_donulmez_goruldu and saga_donulmez_goruldu:
+                olceriz_sıkıntı_yog = time.time()
+                ahaburasıdaboşmuşıheahıeah = True
+            elif sola_donulmez_goruldu:
+                left_tracking = False
+                mid_tracking = False
+                right_tracking = True
+            elif saga_donulmez_goruldu:
+                left_tracking = True
+                mid_tracking = False
+                right_tracking = False
+            elif girilmez_goruldu:
+                sol_dist=average(sol_array)
+                right_dist=average(right_array)
+                if sol_dist > right_dist:
+                    left_tracking = True
+                    mid_tracking = False
+                    right_tracking = False
+                else:
+                    left_tracking = False
+                    mid_tracking = False
+                    right_tracking = True
+        # MUHTEMEL GARBIÇ     
+        """
+        if r_u_sure:
+            pass
+        elif not a and (girilmez_goruldu or saga_donulmez_goruldu or sola_donulmez_goruldu):
+            karar_verici_yakın_zamanda_calisti = True
+            karar_verici_start_time = time.time()
+            if girilmez_goruldu and sola_donulmez_goruldu and not saga_donulmez_goruldu:
+                mid_tracking = False
+                left_tracking = False
+                right_tracking = True
+            elif girilmez_goruldu and saga_donulmez_goruldu and not sola_donulmez_goruldu:
+                mid_tracking = False
+                left_tracking = True
+                right_tracking = False
+            elif saga_donulmez_goruldu and sola_donulmez_goruldu and not girilmez_goruldu:
+                pass
+            elif girilmez_goruldu and not sola_donulmez_goruldu and not saga_donulmez_goruldu:
+                if left_point_distance < right_point_distance:
+                    right_tracking = True
+                    mid_tracking = False
+                    left_tracking = False
+                elif right_point_distance < left_point_distance:
+                    left_tracking = True
+                    mid_tracking = False
+                    right_tracking = False
+            elif sola_donulmez_goruldu and not saga_donulmez_goruldu and not girilmez_goruldu:
+                mid_tracking = False
+                left_tracking = False
+                right_tracking = True
+            elif saga_donulmez_goruldu and not sola_donulmez_goruldu and not girilmez_goruldu:
+                mid_tracking = False
+                left_tracking = True
+                right_tracking = False
+            """
+                
 def park_coordinate_callback(park_data):
     global park_coordinate
     if park_data.data=='0':
