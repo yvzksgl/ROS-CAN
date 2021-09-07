@@ -24,7 +24,7 @@ from  itertools import cycle
 from  sensor_msgs.msg import LaserScan, Joy
 from  numpy.lib.function_base import average
 from  geometry_msgs.msg import Point
-from  pynput.keyboard import Key, Listener
+#from  pynput.keyboard import Key, Listener
 
 np.seterr('raise')
 
@@ -41,7 +41,7 @@ collecting_data = False
 SOL = 0
 ORTA = 1
 SAG = 2 
-AUTONOMOUS_SPEED = 31 # never change this variable randomly!!!
+AUTONOMOUS_SPEED = 35 # never change this variable randomly!!!
 AUTONOMOUS_SPEED_RECOVERY = AUTONOMOUS_SPEED
 POT_CENTER = 1800
 MAX_RPM_MODE_SPEED = 200
@@ -60,8 +60,8 @@ CAR_LENGTH = 2.25
 CURRENT    = 0
 BUS_VOLTAGE = 0
 BICYCLE_LENGTH = 3.5
-SOL_FIXED = 2.31
-SAG_FIXED = 2.31
+SOL_FIXED = 2.65
+SAG_FIXED = 2.65
 kararVerici = np.array([0, 1, 0])
 recently_stopped = False
 recently_stopped_kirmizi = False
@@ -508,7 +508,6 @@ def lidar_data(veri_durak):
 
     sol_array = np.array(veri_durak.ranges[560:672])
     right_array = np.array(veri_durak.ranges[224:336])
-
     sol_array[sol_array > 5] = 5
     right_array[right_array > 5] = 5
 
@@ -997,9 +996,9 @@ def yolo_callback(data):
         for tabela in datas:
             label, _, _, _, distance = tabela.split(',')
 
-            if label == "kirmizi isik" and float(distance) < 6.75 and distance > 2.5:
+            if label == "kirmizi isik" and float(distance) < 6.75 and distance > 2.:
                 kirmizi_hattori = True  
-            elif label == "Durak" and float(distance) < 6.75 and float(distance) > 2.5 and not recently_stopped:
+            elif label == "Durak" and float(distance) < 4.31 and float(distance) > 2. and not recently_stopped and AUTONOMOUS:
                 durak_hanzo = True
                 print("durak girdi")
 
@@ -1047,30 +1046,30 @@ def yolo_callback(data):
             ###################################################################################################
             ###################################################################################################
             ###################################################################################################
-            elif label == "sola donulmez" and distance < 8. and distance > 6:
+            elif label == "sola donulmez" and distance < 8. and distance > 4:
                 sola_donulmez_goruldu = True
-            elif label == "saga donulmez" and distance < 8. and distance > 6:
+            elif label == "saga donulmez" and distance < 8. and distance > 4:
                 saga_donulmez_goruldu = True
-            elif label == "Girilmez" and distance < 8. and distance > 6:
+            elif label == "Girilmez" and distance < 5. and distance > 4:
                 girilmez_goruldu = True
             ###############################################################
-            elif label == "ileriden sola mecburi yon" and distance < 8. and distance > 6:
+            elif label == "ileriden sola mecburi yon" and distance < 8. and distance > 3:
                 left_tracking = True
                 right_tracking = False
                 mid_tracking = False
                 r_u_sure = True
-            elif label == "ileriden saga mecburi yon" and distance < 8. and distance > 6:
+            elif label == "ileriden saga mecburi yon" and distance < 8. and distance > 3:
                 left_tracking = False
                 right_tracking = True
                 mid_tracking = False
                 r_u_sure = True
             ###############################################################
-            elif label == "ileri Ve saga mecburi yon" and distance < 8. and distance > 6:
+            elif label == "ileri Ve saga mecburi yon" and distance < 8. and distance > 3:
                 left_tracking = False
                 right_tracking = True
                 mid_tracking = False
                 r_u_sure = True
-            elif label == "ileri Ve sola mecburi yon" and distance < 8. and distance > 6:
+            elif label == "ileri Ve sola mecburi yon" and distance < 8. and distance > 3:
                 right_tracking = False
                 left_tracking = True
                 mid_tracking = False
@@ -1157,7 +1156,7 @@ def zed_pose(data):
 
     zed_x = data.z
     zed_y = data.x
-
+"""
 # Keyboard #
 def on_press(key):
     global mahmut
@@ -1194,7 +1193,7 @@ def on_release(key):
     elif(key == Key.right):
         direk = 1800
 #*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*#
-
+"""
 """
 <Ardu Odom>
 """
@@ -1244,7 +1243,7 @@ if __name__ == "__main__":
     print(fast_pp(31, 31))
     print(fast_pid(31,31,31,31,31,31))
     # safety #
-    AUTONOMOUS_SPEED -= (AUTONOMOUS_SPEED % 25)
+    #AUTONOMOUS_SPEED -= (AUTONOMOUS_SPEED % 25)
     
     # subscribers
     rospy.Subscriber('/scan', LaserScan, lidar_data, queue_size=10)
@@ -1269,7 +1268,7 @@ if __name__ == "__main__":
     # driving with keyboard    
     hiz = 0
     direk = 1800
-    keyboard_listener = Listener(on_press=on_press, on_release=on_release)
+    #keyboard_listener = Listener(on_press=on_press, on_release=on_release)
     #keyboard_listener.start()
     
     while not rospy.is_shutdown():
