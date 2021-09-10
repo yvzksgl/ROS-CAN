@@ -29,8 +29,11 @@ from  geometry_msgs.msg import Point
 np.seterr('raise')
 
 # global variables #
+TWO_THIRD_PARKING = True
+REVERSE_PARKING = False
 speed = 0
 regen = 0
+DURMAK = 0
 steering_angle = 1800
 speed_odometry = 0
 brake_speed = 0
@@ -41,7 +44,7 @@ collecting_data = False
 SOL = 0
 ORTA = 1
 SAG = 2 
-AUTONOMOUS_SPEED = 35 # never change this variable randomly!!!
+AUTONOMOUS_SPEED = 50 # never change this variable randomly!!!
 AUTONOMOUS_SPEED_RECOVERY = AUTONOMOUS_SPEED
 POT_CENTER = 1800
 MAX_RPM_MODE_SPEED = 200
@@ -49,9 +52,11 @@ RPM_MODE = 1
 CURRENT_MODE = 0
 driving_mode = RPM_MODE
 DORU = (1 == 1)
+
 left_tracking = False
-right_tracking = True
+right_tracking = False
 mid_tracking = False
+
 NEUTRAL = 0
 FORWARD = 1
 REVERSE = 2
@@ -78,6 +83,10 @@ karar_verici_yakın_zamanda_calisti = False
 kirmizida_dur_lan = False
 ahaburasıdaboşmuşıheahıeah = False
 olceriz_sıkıntı_yog = np.inf
+YOLCU = 10
+hazreticounter = 0
+experimental_park_stage_1 = False
+experimental_park_stage_2 = False
 
 # durak experimental #
 first_stop_counter = False
@@ -137,7 +146,13 @@ BUTTON_RB = 0
 BUTTON_BACK = 0
 BUTTON_START = 0
 BUTTON_STICK_LEFT = 0
-BUTTON_STICK_RIGHT = 0 
+BUTTON_STICK_RIGHT = 0
+
+stage1 = True
+stage2 = False
+stage3 = False
+stage4 = False
+
 #*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-#
 
 # parking
@@ -147,10 +162,12 @@ is_durak_mode = False
 park_coordinate = None
 zed_x = None
 zed_y = None
+zed_z = None
+durak_dik_start = None
 denk_coef = None
 closest_point = None
 is_curve_created = False
-CRITICAL_PARKING_DISTANCE = 10
+CRITICAL_PARKING_DISTANCE = 15
 CALCULATE_PARKING_SIGN_DISTANCE = 10
 locked_on_target = False
 parking_sign_current_distance = None
@@ -161,9 +178,9 @@ ERROR_ACCEPTANCE = .3
 
 DIKEY = 0 # 0->(dikey / x)
 YATAY = 1 # 1->(yatay / y)
-twothird = 950
+twothird = 1331
 stage1 = False
-park_distance = np.array([0, 0], dtype=np.float32)
+park_distance = None
 #*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-#
 
 # helper funcs #
@@ -360,13 +377,14 @@ class serhatos(object):
 
 # main function #
 def lidar_data(veri_durak):
+    global YOLCU
+    global DURMAK
     global speed 
     global regen
     global steering_angle
     global is_parking_mode
     global is_durak_mode
     global park_coordinate
-    global park_distance
     global speed_odometry
     global AUTONOMOUS_SPEED
     global FULL_RIGHT
@@ -382,6 +400,9 @@ def lidar_data(veri_durak):
     # PARK #
     global zed_x
     global zed_y
+    global zed_z
+    global park_distance
+    global durak_dik_start
     global denk_coef
     global closest_point
     global recently_stopped
@@ -407,6 +428,18 @@ def lidar_data(veri_durak):
     global olceriz_sıkıntı_yog
     global sol_array
     global right_array
+    global hazreticounter
+
+    global TWO_THIRD_PARKING
+    global REVERSE_PARKING
+
+    global stage1
+    global stage2
+    global stage3
+    global stage4
+
+    global experimental_park_stage_1
+    global experimental_park_stage_2
 
     #sol_laser = np.array(veri_durak.ranges[0:369], dtype=np.float32)
     #sag_laser = np.array(veri_durak.ranges[1079:1439], dtype=np.float32)
@@ -466,11 +499,12 @@ def lidar_data(veri_durak):
     if orhandaldal + 15 < time.time():
         recently_stopped = False
 
+    #if roswtf and abs(math.sqrt(math.pow(durak_dik_start[0] - zed_x, 2) + math.pow(durak_dik_start[1] - zed_z, 2))) > 4:
     if roswtf:
         print(bcolors.WARNING+"DURAK START"+bcolors.ENDC)
         start = time.time()
 
-        while time.time() < start + 10:
+        while time.time() < start + YOLCU:
             mahmut.adc0 = 0
             mahmut.adc1 = 1800
             mahmut.adc2 = 11000
@@ -479,7 +513,7 @@ def lidar_data(veri_durak):
             mahmut.adc5 = driving_mode
             arduino.publish(mahmut)
             qoıwheqdw = round(time.time() - start, 2)
-            print(f"{qoıwheqdw} saniyedir DURAKTAYIZZZZ")
+            print(bcolors.WARNING + f"{qoıwheqdw} saniyedir DURAKTAYIZZZZ" + bcolors.ENDC)
             time.sleep(1/20)
 
         orhandaldal = time.time()
@@ -516,6 +550,8 @@ def lidar_data(veri_durak):
         'left': np.average(sol_array),
         'on' : np.average(on_array)
     }
+
+    print(bcolors.WARNING + "ON MESAFE:" + bcolors.ENDC, distances['on'])
     
     if TERMINATOR:
         if AUTONOMOUS:
@@ -524,6 +560,7 @@ def lidar_data(veri_durak):
             # Normal Autonomous
 
             if kirmizida_dur_lan:
+                print(bcolors.FAIL + "KIRMIZIDA DURDUM LAN" + bcolors.ENDC)
                 mahmut.adc0 = 0
                 mahmut.adc1 = 1800
                 mahmut.adc2 = 11000
@@ -564,7 +601,7 @@ def lidar_data(veri_durak):
                 # doldur
                 mahmut.adc0 = int(AUTONOMOUS_SPEED)
                 mahmut.adc1 = int(angle)
-                mahmut.adc2 = 0 + brake_value
+                mahmut.adc2 = 0
                 mahmut.adc3 = FORWARD
                 mahmut.adc4 = True
                 mahmut.adc5 = int(RPM_MODE)
@@ -598,15 +635,13 @@ def lidar_data(veri_durak):
                 # doldur
                 mahmut.adc0 = int(AUTONOMOUS_SPEED)
                 mahmut.adc1 = int(angle)
-                mahmut.adc2 = 0 + brake_value
+                mahmut.adc2 = 0
                 mahmut.adc3 = FORWARD
                 mahmut.adc4 = True
                 mahmut.adc5 = int(driving_mode)
 
             elif right_tracking == DORU:
                 print(bcolors.FAIL + "RIGHT_TRACKING" + bcolors.ENDC)
-                #   CHECK THE DIRECTION
-                #
 
                 right_point_distance = np.average(right_array)
                 left_point_distance = np.average(sol_array)
@@ -632,13 +667,259 @@ def lidar_data(veri_durak):
                 # doldur
                 mahmut.adc0 = int(AUTONOMOUS_SPEED)
                 mahmut.adc1 = int(angle)
-                mahmut.adc2 = 0 + brake_value
+                mahmut.adc2 = 0
                 mahmut.adc3 = FORWARD
                 mahmut.adc4 = True
                 mahmut.adc5 = int(driving_mode)
 
             # <Parking Autonomous>
-            elif is_parking_mode:
+            elif is_parking_mode: #elif is_parking_mode:
+                print("PARKING MODE \n")
+                # full sag, ortalanınca middle takip park modu
+                if 0:
+                    if park_distance > 10 and not experimental_park_stage_1:
+                        right_point_distance = np.average(right_array)
+                        left_point_distance = np.average(sol_array)
+
+                        if(right_point_distance > 5):
+                            right_point_distance = 5
+                        if(left_point_distance > 5):
+                            left_point_distance = 5
+                        
+                        # !!!!!!!! 1.5 !!!!!!!!!!
+                        steering = fast_pp(1.5 , left_point_distance)
+            
+                        if steering < -.5:
+                            steering = -.5
+                        elif steering > .5:
+                            steering = .5
+
+                        angle = potingen_straße(steering, POT_CENTER-1800)
+
+                        if park_coordinate > 1600:
+                            experimental_park_stage_1 = True
+
+                        mahmut.adc0 = int(0)
+                        mahmut.adc1 = int(angle)
+                        mahmut.adc2 = 0
+                        mahmut.adc3 = FORWARD
+                        mahmut.adc4 = True
+                        mahmut.adc5 = int(driving_mode)
+                    
+                    elif experimental_park_stage_1 and not experimental_park_stage_2:
+                        mahmut.adc0 = int(AUTONOMOUS_SPEED)
+                        mahmut.adc1 = int(FULL_RIGHT) # ölümüne sağ
+                        mahmut.adc2 = 0
+                        mahmut.adc3 = FORWARD
+                        mahmut.adc4 = True
+                        mahmut.adc5 = int(driving_mode)
+
+                        if abs(850 - park_coordinate) < 100:
+                            experimental_park_stage_2 = True
+
+                    else:
+                        print("EXPERiMENTAL PARKiNG LasT StaGE")
+                        target_diff = (850 - park_coordinate) / 1700
+                        steer = (target_diff + 0.5) * 3600
+
+                        mahmut.adc0 = int(AUTONOMOUS_SPEED)
+                        mahmut.adc1 = int(steer) # face your destiny mahmut
+                        mahmut.adc2 = 0
+                        mahmut.adc3 = FORWARD
+                        mahmut.adc4 = True
+                        mahmut.adc5 = int(driving_mode)
+
+                        if distances['on'] < 1.5:
+                            while True:
+                                mahmut.adc0 = DURMAK
+                                mahmut.adc1 = 1800
+                                mahmut.adc2 = 11000
+                                mahmut.adc3 = FORWARD
+                                mahmut.adc4 = True
+                                mahmut.adc5 = int(driving_mode)
+                                arduino.publish(mahmut)
+                                print("DURDUM \m/!")
+                                time.sleep(1/20)
+
+
+                # raw two third mode
+                elif 0:
+                    if distances['on'] > 7.5:
+                        print("TWO THIRD PARK")
+                        target_diff = (twothird - park_coordinate) / 1700
+                        steer = (target_diff + 0.5) * 3600
+                    else:
+                        print("MIDDLE PARk")
+                        target_diff = (850 - park_coordinate) / 1700
+                        steer = (target_diff + 0.5) * 3600
+
+                        if distances['on'] < 1.5:
+                            while True:
+                                mahmut.adc0 = DURMAK
+                                mahmut.adc1 = 1800
+                                mahmut.adc2 = 11000
+                                mahmut.adc3 = FORWARD
+                                mahmut.adc4 = True
+                                mahmut.adc5 = int(driving_mode)
+                                arduino.publish(mahmut)
+                                print("DURDUM \m/!")
+                                time.sleep(1/20)
+
+                    mahmut.adc0 = AUTONOMOUS_SPEED
+                    mahmut.adc1 = int(steer)
+                    mahmut.adc2 = 0
+                    mahmut.adc3 = FORWARD
+                    mahmut.adc4 = True
+                    mahmut.adc5 = int(driving_mode)
+
+                # first left track, düzgün park distance sonrası two_third/mid tracking
+                elif 1:
+                    #stagei buradan kaldır ya da adını degistir xd
+                    if stage1:
+                        print("stage 1, sollu")
+                        right_point_distance = np.average(right_array)
+                        left_point_distance = np.average(sol_array)
+
+                        if(right_point_distance > 5):
+                            right_point_distance = 5
+                        if(left_point_distance > 5):
+                            left_point_distance = 5
+
+                        parksagdistance = 3.
+                        steering = fast_pp(parksagdistance, left_point_distance)
+
+                        if steering < -.5:
+                            steering = -.5
+                        elif steering > .5:
+                            steering = .5
+                        
+                        angle = potingen_straße(steering, POT_CENTER-1800)
+
+                        if park_coordinate > 1600:
+                            stage1 = False
+
+                        # doldur
+                        mahmut.adc0 = int(AUTONOMOUS_SPEED)
+                        mahmut.adc1 = int(angle)
+                        mahmut.adc2 = 0
+                        mahmut.adc3 = FORWARD
+                        mahmut.adc4 = True
+                        mahmut.adc5 = int(driving_mode)
+                    else:
+                        print("stage1 in else kısmı")
+                        if park_distance > 7.5: #yaviz
+                            print("TWO THIRD PARK")
+                            target_diff = (twothird - park_coordinate) / 1700
+                            steer = (target_diff + 0.5) * 3600
+                        else:
+                            print("MIDDLE PARk")
+                            target_diff = (850 - park_coordinate) / 1700
+                            steer = (target_diff + 0.5) * 3600
+                        
+                        mahmut.adc0 = AUTONOMOUS_SPEED
+                        mahmut.adc1 = int(steer)
+                        mahmut.adc2 = 0
+                        mahmut.adc3 = FORWARD
+                        mahmut.adc4 = True
+                        mahmut.adc5 = int(driving_mode)                        
+                        
+                        if distances['on'] < 4:
+                            mahmut.adc0 = DURMAK
+                            mahmut.adc1 = int(steer)
+                            mahmut.adc2 = 1000
+                            mahmut.adc3 = FORWARD
+                            mahmut.adc4 = True
+                            mahmut.adc5 = int(driving_mode)
+                            print("REGEN \m/!")
+                        elif distances['on'] < 1.75:
+                            mahmut.adc0 = DURMAK
+                            mahmut.adc1 = 1900
+                            mahmut.adc2 = 11000
+                            mahmut.adc3 = FORWARD
+                            mahmut.adc4 = True
+                            mahmut.adc5 = int(driving_mode)
+                            print("DURMAK \m/!")
+
+
+                
+                # two third, mid, geri 2x, geri x, düz
+                elif 0:
+                    if stage1:
+                        if park_distance > 8:
+                            print("TWO THIRD PARK")
+                            target_diff = (twothird - park_coordinate) / 1700
+                            steer = (target_diff + 0.5) * 3600
+                            mahmut.adc0 = AUTONOMOUS_SPEED
+                            mahmut.adc1 = int(steer)
+                            mahmut.adc2 = 0
+                            mahmut.adc3 = FORWARD
+                            mahmut.adc4 = True
+                            mahmut.adc5 = int(driving_mode)
+                        else:
+                            print("MIDDLE PARk")
+                            target_diff = (850 - park_coordinate) / 1700
+                            steer = (target_diff + 0.5) * 3600
+                            mahmut.adc0 = AUTONOMOUS_SPEED
+                            mahmut.adc1 = int(steer)
+                            mahmut.adc2 = 0
+                            mahmut.adc3 = FORWARD
+                            mahmut.adc4 = True
+                            mahmut.adc5 = int(driving_mode)
+                        
+                            if distances['on'] < 2.7:
+                                stage1 = False
+                                stage2 = True
+                    elif stage2:
+                        mahmut.adc0 = 25
+                        mahmut.adc1 = FULL_LEFT
+                        mahmut.adc2 = 0
+                        mahmut.adc3 = REVERSE
+                        mahmut.adc4 = True
+                        mahmut.adc5 = int(driving_mode)
+                        
+                        if distances['on'] < 5.0:
+                            stage2 = False
+                            stage3 = True
+                    elif stage3:
+                        mahmut.adc0 = 25
+                        mahmut.adc1 = FULL_RIGHT
+                        mahmut.adc2 = 0
+                        mahmut.adc3 = REVERSE
+                        mahmut.adc4 = True
+                        mahmut.adc5 = int(driving_mode)
+                        
+                        if distances['on'] < 7.:
+                            stage3 = False
+                            stage4 = True
+                    elif stage4:
+                        target_diff = (640 - park_coordinate) / 1280
+
+                        mahmut.adc0 = 31
+                        mahmut.adc1 = (target_diff + 0.5) * 3600
+                        mahmut.adc2 = 0
+                        mahmut.adc3 = FORWARD
+                        mahmut.adc4 = True
+                        mahmut.adc5 = int(driving_mode)
+
+                        if distances['on'] < 1.5:
+                            while True:
+                                mahmut.adc0 = DURMAK
+                                mahmut.adc1 = 1800
+                                mahmut.adc2 = 11000
+                                mahmut.adc3 = FORWARD
+                                mahmut.adc4 = True
+                                mahmut.adc5 = int(driving_mode)
+                                arduino.publish(mahmut)
+                                print("DURDUM \m/!")
+                                time.sleep(1/20)
+
+                    arduino.publish(mahmut)
+
+            # anciecnt park koordinatı bilinen kod
+            elif 0:
+                pass
+                # zed pose beklenen dişinda
+                """
                 #@ZED değiştirilecek !!!!
                 parking_object.__current_pos = [zed_pose[0], zed_pose[1]] # anlık araç konumu
                 parking_object.__eval__()
@@ -652,7 +933,7 @@ def lidar_data(veri_durak):
                         right_point_distance = 5
                     if(left_point_distance > 5):
                         left_point_distance = 5
-
+                    
                     steering = fast_pp(SAG_FIXED, left_point_distance)
         
                     if steering < -.5:
@@ -668,6 +949,7 @@ def lidar_data(veri_durak):
                     mahmut.adc3 = FORWARD
                     mahmut.adc4 = True
                     mahmut.adc5 = int(driving_mode)
+                
                 
                 # face your destiny dear mahmut
                 else:
@@ -699,6 +981,8 @@ def lidar_data(veri_durak):
                         mahmut.adc3 = FORWARD
                         mahmut.adc4 = True
                         mahmut.adc5 = int(driving_mode)
+                """
+
             #
             #   LOGGER
             # 
@@ -725,7 +1009,11 @@ def lidar_data(veri_durak):
         # f710
         else:
             pid_controller.pidError = 0
+            hazreticounter = 0
+            is_parking_mode = False
             steering_angle = (l_left_right+1)*1800  # 0 3600
+            experimental_park_stage_1 = False
+            experimental_park_stage_2 = False
 
             #if not CRUISE_CONTROL and driving_mode == CURRENT_MODE:
             if driving_mode == CURRENT_MODE:
@@ -744,11 +1032,11 @@ def lidar_data(veri_durak):
             mahmut.adc5 = int(driving_mode)    # mode
 
             if distances['left'] - distances['right'] > 0.1:
-                d = " left"
+                d = "left"
             elif distances['left'] - distances['right'] < -0.1:
                 d = "right"            
             else:
-                d = "  Mid"
+                d = "Mid"
 
             if GEAR == 0:
                 str_gear = "\tNEUTRAl"
@@ -916,13 +1204,11 @@ def F1_2020(russell):
                 else:
                     brake_value = 10000
                 #collecting_data ^= True
-            if BUTTON_X and right_trigger == 1 and speed == 0:
+            if BUTTON_X and right_trigger == 1:
                 GEAR = next(gear_generator)
-            
             if BUTTON_BACK:
                 CRUISE_CONTROL ^= True
                 if CRUISE_CONTROL == False: speed = 0
-            
             if BUTTON_LB:
                 if AUTONOMOUS:
                     if AUTONOMOUS_SPEED != 0:
@@ -952,6 +1238,8 @@ def yolo_callback(data):
     global AUTONOMOUS_SPEED_RECOVERY
     global CRITICAL_PARKING_DISTANCE
     global CALCULATE_PARKING_SIGN_DISTANCE
+    global TWO_THIRD_PARKING
+    global REVERSE_PARKING
     global speed
     global brake
     global brake_value
@@ -964,6 +1252,9 @@ def yolo_callback(data):
     global first_stop
     global zed_x
     global zed_y
+    global zed_z
+    global park_distance
+    global durak_dik_start
     global is_curve_created
     global closest_point
     global recently_stopped
@@ -981,6 +1272,7 @@ def yolo_callback(data):
     global olceriz_sıkıntı_yog
     global sol_array
     global right_array
+    global hazreticounter
 
     sola_donulmez_goruldu = False
     saga_donulmez_goruldu = False
@@ -993,22 +1285,40 @@ def yolo_callback(data):
         kirmizi_hattori = False
         durak_hanzo = False
 
+        park_seen = False
+        park_yapilmaz_seen = False
+
         for tabela in datas:
             label, _, _, _, distance = tabela.split(',')
+            distance = float(distance)
 
-            if label == "kirmizi isik" and float(distance) < 6.75 and distance > 2.:
-                kirmizi_hattori = True  
-            elif label == "Durak" and float(distance) < 4.31 and float(distance) > 2. and not recently_stopped and AUTONOMOUS:
+            if label == "kirmizi isik" and float(distance) < 8. and float(distance) > 4. and AUTONOMOUS:
+                kirmizi_hattori = True
+                print("kirmizi hattori:", distance)
+            elif label == "Durak" and float(distance) < 5.31 and float(distance) > 2 and not recently_stopped and AUTONOMOUS:
                 durak_hanzo = True
                 print("durak girdi")
+            elif label == "Park Yasak" and distance < 10.:
+                hazreticounter += 1
+            elif label == "Park Yasak" and distance < 15:
+                left_tracking = True
+                mid_tracking = False
+                right_tracking = False
+                roswtf = False
+                kirmizida_dur_lan = False
+
 
         if kirmizi_hattori:
             kirmizida_dur_lan = True
             return
-        elif durak_hanzo:
+        else:
+            kirmizida_dur_lan = False
+
+        if durak_hanzo:
             print("durak hanzo")
             roswtf = True
             recently_stopped = True
+            durak_dik_start = [zed_x, zed_z]
             return      
             
         sola_donulmez_goruldu = False
@@ -1016,6 +1326,14 @@ def yolo_callback(data):
         girilmez_goruldu = False
 
         r_u_sure = False
+
+        if hazreticounter > 10:
+            mid_tracking = False
+            left_tracking = False
+            right_tracking = False
+            kirmizida_dur_lan = False
+            roswtf = False
+            is_parking_mode = True
 
         for tabela in datas:
             label, x, y, z, distance = tabela.split(',')
@@ -1032,48 +1350,50 @@ def yolo_callback(data):
             ##################################################################################################            
             if label == "yesil isik":
                 kirmizida_dur_lan = False
-            elif label == "Park Yeri" and distance < CALCULATE_PARKING_SIGN_DISTANCE and not locked_on_target:
+            elif label == "Park Yeri":
+                pass
                 #@ZED değiştirilecek !!!!
-                parking_object.__target = [x, y] # hedef tabelanın koordinatlarını belirle!
-                locked_on_target = True
-                break
+                #parking_object.__target = [x, y] # hedef tabelanın koordinatlarını belirle!
+                #locked_on_target = True
 
-            elif label in ("Park Yeri", "Park Yapilmaz") and distance < CRITICAL_PARKING_DISTANCE:
-                is_parking_mode = True
-                break
+            #elif label in ("Park Yeri", "Park Yapilmaz") and distance < CRITICAL_PARKING_DISTANCE:
+            #    is_parking_mode = True
+            #    break
             ###################################################################################################
             ###################################################################################################
             ###################################################################################################
             ###################################################################################################
             ###################################################################################################
-            elif label == "sola donulmez" and distance < 8. and distance > 4:
+            elif label == "sola donulmez" and distance < 6.5 and distance > 3.5:
                 sola_donulmez_goruldu = True
-            elif label == "saga donulmez" and distance < 8. and distance > 4:
+                print("amcık")
+            elif label == "saga donulmez" and distance < 6.5 and distance > 3.5:
                 saga_donulmez_goruldu = True
-            elif label == "Girilmez" and distance < 5. and distance > 4:
-                girilmez_goruldu = True
-            ###############################################################
-            elif label == "ileriden sola mecburi yon" and distance < 8. and distance > 3:
+            elif label == "Girilmez" and distance < 5. and distance > 3.5:
+                girilmez_goruldu = False
+            ####################################################################################
+            elif label == "ileriden sola mecburi yon" and distance < 6.5 and distance > 3.5:
                 left_tracking = True
                 right_tracking = False
                 mid_tracking = False
                 r_u_sure = True
-            elif label == "ileriden saga mecburi yon" and distance < 8. and distance > 3:
+            elif label == "ileriden saga mecburi yon" and distance < 6.5 and distance > 3.5:
                 left_tracking = False
                 right_tracking = True
                 mid_tracking = False
                 r_u_sure = True
-            ###############################################################
-            elif label == "ileri Ve saga mecburi yon" and distance < 8. and distance > 3:
+            ####################################################################################
+            elif label == "ileri Ve saga mecburi yon" and distance < 6.5 and distance > 3.5:
                 left_tracking = False
                 right_tracking = True
                 mid_tracking = False
                 r_u_sure = True
-            elif label == "ileri Ve sola mecburi yon" and distance < 8. and distance > 3:
+            elif label == "ileri Ve sola mecburi yon" and distance < 6.5 and distance > 3.5:
                 right_tracking = False
                 left_tracking = True
                 mid_tracking = False
                 r_u_sure = True
+            ####################################################################################
             else:
                 pass
         
@@ -1100,7 +1420,10 @@ def yolo_callback(data):
                     left_tracking = False
                     mid_tracking = False
                     right_tracking = True
-        # MUHTEMEL GARBIÇ     
+            else:
+                pass
+        
+        # OLD BUT GOLD     
         """
         if r_u_sure:
             pass
@@ -1138,24 +1461,28 @@ def yolo_callback(data):
                 
 def park_coordinate_callback(park_data):
     global park_coordinate
-    if park_data.data=='0':
+    if park_data.data == '0':
         pass
     else:
         park_coordinate = float(park_data.data)
 
-
-# Point(x, y, z) data
 def park_distance_callback(data):
     global park_distance
-    park_distance[0] = abs(data.z)
-    park_distance[1] = abs(data.y)
+    if data.data == '0':
+        pass
+    else:
+        park_distance = float(data.data)
 
+# Point(x, y, z) data
 def zed_pose(data):
     global zed_x
     global zed_y
+    global zed_z
 
-    zed_x = data.z
-    zed_y = data.x
+    zed_x = data.x
+    zed_y = data.y
+    zed_z = data.z
+    
 """
 # Keyboard #
 def on_press(key):
@@ -1250,9 +1577,9 @@ if __name__ == "__main__":
     rospy.Subscriber('/joy', Joy, F1_2020, queue_size=10)
     rospy.Subscriber('/pot_topic', Adc, haydi_gel_icelim, queue_size=10)
     rospy.Subscriber('yolo_park', String, park_coordinate_callback, queue_size=10)
+    rospy.Subscriber('/yolo_park_distance', String, park_distance_callback, queue_size=10)
     rospy.Subscriber('/zed_detections', String, yolo_callback, queue_size=10)
-    rospy.Subscriber('zed_yolo_sign_coord', Point, park_distance_callback, queue_size=10)
-    rospy.Subscriber('zed_yolo_pose',Point,zed_pose,queue_size = 10)
+    rospy.Subscriber('zed_pose', Point, zed_pose, queue_size = 10)
     # publishers
     arduino = rospy.Publisher("/seko", Adc, queue_size=10, latch=True)
     lcd = rospy.Publisher("/screen", Adc, queue_size=10, latch=True)

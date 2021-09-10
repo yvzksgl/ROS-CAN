@@ -446,13 +446,13 @@ void loop(){
     /*
      * Elder Version, Unnecessary sums
      */
-     /* 
-    int pot_signal_raw = analogRead(EncoderPin);
-    int encoder_degree = map(pot_signal_raw, 0, 1023, 0, 3600);
-    
-    buffer[buffer_index++] = encoder_degree;
-    buffer_average = buffer_avg(buffer, BUFFER_SIZE);
-    buffer_index = (buffer_index > BUFFER_SIZE ? 0 : buffer_index);
+    /* 
+      int pot_signal_raw = analogRead(EncoderPin);
+      int encoder_degree = map(pot_signal_raw, 0, 1023, 0, 3600);
+      
+      buffer[buffer_index++] = encoder_degree;
+      buffer_average = buffer_avg(buffer, BUFFER_SIZE);
+      buffer_index = (buffer_index > BUFFER_SIZE ? 0 : buffer_index);
     */   
 
 
@@ -476,15 +476,15 @@ void loop(){
     
     /******************** Debug Topic ******************/ 
     /* rpm */
-    pot_data.adc0 = speed_odom.data[1];
+    pot_data.adc0 = 3131;
     /* steer */
     pot_data.adc1 = pot_odom;
     /* bus voltage / bus current */
     pot_data.adc2 = battery_odom.data[0];
     pot_data.adc3 = is_braking;
     /* unused */
-    pot_data.adc4 = current_position;
-    pot_data.adc5 = (change_value);
+    pot_data.adc4 = speed_odom.data[0];
+    pot_data.adc5 = speed_odom.data[1];
     
     pub.publish(&pot_data);
     nh.spinOnce();
