@@ -1014,10 +1014,10 @@ def isik_testi(data):
           
           if((not isik_eklendi) and checker(label_list)):
               print(isik_list)
-              detected_objects += label + "," + str(x)+ ","+ str(y) + "," + str(z) + ","+ str(np.array(isik_list, dtype=np.float32).max()) + ";"
+              detected_objects += label + "," + str(x)+ ","+ str(y) + "," + str(z) + ","+ str(np.array(isik_list, dtype=np.float32).min()) + ";"
               isik_eklendi = True
           elif((not isik_eklendi) and checker(label_list)):
-              detected_objects += label + "," + str(x)+ ","+ str(y) + "," + str(z) + ","+ str(np.array(isik_list).max()) + ";"
+              detected_objects += label + "," + str(x)+ ","+ str(y) + "," + str(z) + ","+ str(np.array(isik_list,  dtype=np.float32).min()) + ";"
               isik_eklendi = True
     return detected_objects
 
