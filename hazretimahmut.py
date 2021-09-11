@@ -44,7 +44,7 @@ collecting_data = False
 SOL = 0
 ORTA = 1
 SAG = 2 
-AUTONOMOUS_SPEED = 50 # never change this variable randomly!!!
+AUTONOMOUS_SPEED = 42 # never change this variable randomly!!!
 AUTONOMOUS_SPEED_RECOVERY = AUTONOMOUS_SPEED
 POT_CENTER = 1800
 MAX_RPM_MODE_SPEED = 200
@@ -53,9 +53,9 @@ CURRENT_MODE = 0
 driving_mode = RPM_MODE
 DORU = (1 == 1)
 
-left_tracking = False
-right_tracking = False
-mid_tracking = False
+left_tracking = 0
+right_tracking = 1
+mid_tracking = 0
 
 NEUTRAL = 0
 FORWARD = 1
@@ -87,6 +87,12 @@ YOLCU = 10
 hazreticounter = 0
 experimental_park_stage_1 = False
 experimental_park_stage_2 = False
+mahmutapozisyonçeşitliliği = np.array([.0, .0, .0])
+igotthepose = False
+yesil_gorundu = False
+
+büllük = False
+güllük = np.array([.0,.0,.0])
 
 # durak experimental #
 first_stop_counter = False
@@ -171,6 +177,7 @@ CRITICAL_PARKING_DISTANCE = 15
 CALCULATE_PARKING_SIGN_DISTANCE = 10
 locked_on_target = False
 parking_sign_current_distance = None
+park_left_not_started = True
 
 ACKERMAN_RADIUS = 4
 LABEL_OFFSET = 9.
@@ -430,6 +437,12 @@ def lidar_data(veri_durak):
     global right_array
     global hazreticounter
 
+    global güllük
+    global büllük
+
+    global mahmutapozisyonçeşitliliği
+    global igotthepose
+
     global TWO_THIRD_PARKING
     global REVERSE_PARKING
 
@@ -441,6 +454,9 @@ def lidar_data(veri_durak):
     global experimental_park_stage_1
     global experimental_park_stage_2
 
+    global yesil_gorundu
+    global kirmizi_distance
+
     #sol_laser = np.array(veri_durak.ranges[0:369], dtype=np.float32)
     #sag_laser = np.array(veri_durak.ranges[1079:1439], dtype=np.float32)
     
@@ -449,7 +465,8 @@ def lidar_data(veri_durak):
 
 
     if ahaburasıdaboşmuşıheahıeah:
-        # TUNE ET LAN 
+        pass
+        # TUNE ET
         """ 
         while olceriz_sıkıntı_yog + 3 > time.time():
             mahmut.adc0 = AUTONOMOUS_SPEED
@@ -459,21 +476,24 @@ def lidar_data(veri_durak):
             mahmut.adc4 = True
             mahmut.adc5 = driving_mode 
         """
-        while olceriz_sıkıntı_yog + 3 > time.time():
+        """ while olceriz_sıkıntı_yog + 4 > time.time():
+            print("ahaburasıdaboşmuşıheahıeahahaburasıdaboşmuşıheahıeahahaburasıdaboşmuşıheahıeah")
             zol = np.array(veri_durak.ranges[560:672])
             zag = np.array(veri_durak.ranges[224:336])
 
-            solumsu = zol[zol > 2.5] = 2.5
-            sagimsi = zag[zag > 2.5] = 2.5
+            solumsu = zol[zol > 2.78] = 2.78
+            sagimsi = zag[zag > 2.78] = 2.78
 
             xd = fast_pp(average(sagimsi), average(solumsu))
             
             mahmut.adc0 = AUTONOMOUS_SPEED
-            mahmut.adc1 = xd
+            mahmut.adc1 = int(xd)
             mahmut.adc2 = 0
             mahmut.adc3 = FORWARD
             mahmut.adc4 = True
             mahmut.adc5 = driving_mode
+            time.sleep(1/20)
+            arduino.publish(mahmut) """
         
         ahaburasıdaboşmuşıheahıeah = False
 
@@ -504,21 +524,32 @@ def lidar_data(veri_durak):
         print(bcolors.WARNING+"DURAK START"+bcolors.ENDC)
         start = time.time()
 
-        while time.time() < start + YOLCU:
-            mahmut.adc0 = 0
-            mahmut.adc1 = 1800
-            mahmut.adc2 = 11000
-            mahmut.adc3 = FORWARD
-            mahmut.adc4 = True
-            mahmut.adc5 = driving_mode
-            arduino.publish(mahmut)
-            qoıwheqdw = round(time.time() - start, 2)
-            print(bcolors.WARNING + f"{qoıwheqdw} saniyedir DURAKTAYIZZZZ" + bcolors.ENDC)
-            time.sleep(1/20)
+        if not igotthepose:
+            mahmutapozisyonçeşitliliği[0] = zed_x
+            mahmutapozisyonçeşitliliği[1] = zed_y
+            mahmutapozisyonçeşitliliği[2] = zed_z
+            igotthepose = True
 
-        orhandaldal = time.time()
-        roswtf = False
-        print(bcolors.WARNING+"DURAK FINISH!"+bcolors.ENDC)
+        print("duraktan beri gittiğim yolu s2m: ",math.pow(mahmutapozisyonçeşitliliği[0] - zed_x, 2) + math.pow(mahmutapozisyonçeşitliliği[2] - zed_z, 2))
+        # pose difference
+        if math.sqrt(math.pow(mahmutapozisyonçeşitliliği[0] - zed_x, 2) + math.pow(mahmutapozisyonçeşitliliği[2] - zed_z, 2)) > 4:
+            while time.time() < start + YOLCU:
+                mahmut.adc0 = 0
+                mahmut.adc1 = 1800
+                mahmut.adc2 = 11000
+                mahmut.adc3 = FORWARD
+                mahmut.adc4 = True
+                mahmut.adc5 = driving_mode
+                arduino.publish(mahmut)
+                qoıwheqdw = round(time.time() - start, 2)
+                print(bcolors.WARNING + f"{qoıwheqdw} saniyedir DURAKTAYIZZZZ" + bcolors.ENDC)
+                time.sleep(1/20)
+
+            orhandaldal = time.time()
+            roswtf = False
+            igotthepose = False
+            print(bcolors.WARNING+"DURAK FINISH!"+bcolors.ENDC)
+
 
     if collecting_data:
         writer.writerow([sol_laser, sag_laser, arduino_odometry['steering_angle']])
@@ -536,12 +567,9 @@ def lidar_data(veri_durak):
     sag_z = np.array(veri_durak.ranges[1200:1260]) """
 
     on_array = np.array(veri_durak.ranges[440:456])
-
-    #sol_array = (sol_x * 5 + 3 * sol_y + sol_z) / 9
-    #right_array = (sag_x * 5 + 3 * sag_y + sag_z) / 9
-
     sol_array = np.array(veri_durak.ranges[560:672])
     right_array = np.array(veri_durak.ranges[224:336])
+
     sol_array[sol_array > 5] = 5
     right_array[right_array > 5] = 5
 
@@ -551,22 +579,25 @@ def lidar_data(veri_durak):
         'on' : np.average(on_array)
     }
 
-    print(bcolors.WARNING + "ON MESAFE:" + bcolors.ENDC, distances['on'])
+    print(bcolors.WARNING + "ON MESAFE:    " + bcolors.ENDC, distances['on'])
+    print(bcolors.WARNING + "park distance:" + bcolors.ENDC, park_distance)
+    print(bcolors.WARNING + "park coord:   " + bcolors.ENDC, park_coordinate)
     
     if TERMINATOR:
         if AUTONOMOUS:
             print(bcolors.WARNING + "AUTONOMOUS" + bcolors.ENDC)
             driving_mode = RPM_MODE
-            # Normal Autonomous
 
             if kirmizida_dur_lan:
-                print(bcolors.FAIL + "KIRMIZIDA DURDUM LAN" + bcolors.ENDC)
-                mahmut.adc0 = 0
-                mahmut.adc1 = 1800
+                print(bcolors.WARNING + "KIRMIZIYA GELDİM SANKİ" + bcolors.ENDC)
+
+                mahmut.adc0 = AUTONOMOUS_SPEED
+                mahmut.adc1 = int(1800)
                 mahmut.adc2 = 11000
                 mahmut.adc3 = FORWARD
                 mahmut.adc4 = True
                 mahmut.adc5 = driving_mode
+
 
             elif mid_tracking == True:
                 print(bcolors.FAIL + "MID_TRACKING" + bcolors.ENDC)
@@ -586,6 +617,7 @@ def lidar_data(veri_durak):
                 print("r", right_point_distance)
                 print("l", left_point_distance)
                 steering = fast_pp(right_point_distance, left_point_distance)
+                print("steering angle:", steering)
 
                 #pid method
                 #steering = pid_controller.calculate(distances['left'] - distances['right'])
@@ -674,7 +706,7 @@ def lidar_data(veri_durak):
 
             # <Parking Autonomous>
             elif is_parking_mode: #elif is_parking_mode:
-                print("PARKING MODE \n")
+                print(bcolors.WARNING + 10 * '-' + "PARKING MODE \n" + 10 * '-' + bcolors.ENDC)
                 # full sag, ortalanınca middle takip park modu
                 if 0:
                     if park_distance > 10 and not experimental_park_stage_1:
@@ -776,7 +808,7 @@ def lidar_data(veri_durak):
                 elif 1:
                     #stagei buradan kaldır ya da adını degistir xd
                     if stage1:
-                        print("stage 1, sollu")
+                        print(bcolors.FAIL+"stage 1, sollu"+bcolors.ENDC)
                         right_point_distance = np.average(right_array)
                         left_point_distance = np.average(sol_array)
 
@@ -795,11 +827,11 @@ def lidar_data(veri_durak):
                         
                         angle = potingen_straße(steering, POT_CENTER-1800)
 
-                        if park_coordinate > 1600:
+                        if park_coordinate > 1631:
                             stage1 = False
 
                         # doldur
-                        mahmut.adc0 = int(AUTONOMOUS_SPEED)
+                        mahmut.adc0 = int(32)
                         mahmut.adc1 = int(angle)
                         mahmut.adc2 = 0
                         mahmut.adc3 = FORWARD
@@ -807,7 +839,7 @@ def lidar_data(veri_durak):
                         mahmut.adc5 = int(driving_mode)
                     else:
                         print("stage1 in else kısmı")
-                        if park_distance > 7.5: #yaviz
+                        if park_distance > 5.75 and sekorakı: #yaviz
                             print("TWO THIRD PARK")
                             target_diff = (twothird - park_coordinate) / 1700
                             steer = (target_diff + 0.5) * 3600
@@ -816,29 +848,21 @@ def lidar_data(veri_durak):
                             target_diff = (850 - park_coordinate) / 1700
                             steer = (target_diff + 0.5) * 3600
                         
-                        mahmut.adc0 = AUTONOMOUS_SPEED
+                        mahmut.adc0 = int(32)
                         mahmut.adc1 = int(steer)
                         mahmut.adc2 = 0
                         mahmut.adc3 = FORWARD
                         mahmut.adc4 = True
                         mahmut.adc5 = int(driving_mode)                        
                         
-                        if distances['on'] < 4:
-                            mahmut.adc0 = DURMAK
-                            mahmut.adc1 = int(steer)
-                            mahmut.adc2 = 1000
-                            mahmut.adc3 = FORWARD
-                            mahmut.adc4 = True
-                            mahmut.adc5 = int(driving_mode)
-                            print("REGEN \m/!")
-                        elif distances['on'] < 1.75:
+                        if distances['on'] < 2.5:
                             mahmut.adc0 = DURMAK
                             mahmut.adc1 = 1900
                             mahmut.adc2 = 11000
                             mahmut.adc3 = FORWARD
                             mahmut.adc4 = True
                             mahmut.adc5 = int(driving_mode)
-                            print("DURMAK \m/!")
+                            print(bcolors.FAIL+"DURMAK \m/!"+bcolors.ENDC)
 
 
                 
@@ -849,24 +873,14 @@ def lidar_data(veri_durak):
                             print("TWO THIRD PARK")
                             target_diff = (twothird - park_coordinate) / 1700
                             steer = (target_diff + 0.5) * 3600
-                            mahmut.adc0 = AUTONOMOUS_SPEED
-                            mahmut.adc1 = int(steer)
-                            mahmut.adc2 = 0
-                            mahmut.adc3 = FORWARD
-                            mahmut.adc4 = True
-                            mahmut.adc5 = int(driving_mode)
-                        else:
-                            print("MIDDLE PARk")
-                            target_diff = (850 - park_coordinate) / 1700
-                            steer = (target_diff + 0.5) * 3600
-                            mahmut.adc0 = AUTONOMOUS_SPEED
+                            mahmut.adc0 = 25
                             mahmut.adc1 = int(steer)
                             mahmut.adc2 = 0
                             mahmut.adc3 = FORWARD
                             mahmut.adc4 = True
                             mahmut.adc5 = int(driving_mode)
                         
-                            if distances['on'] < 2.7:
+                            if distances['on'] < 3.5:
                                 stage1 = False
                                 stage2 = True
                     elif stage2:
@@ -877,7 +891,7 @@ def lidar_data(veri_durak):
                         mahmut.adc4 = True
                         mahmut.adc5 = int(driving_mode)
                         
-                        if distances['on'] < 5.0:
+                        if distances['on'] < 6.0:
                             stage2 = False
                             stage3 = True
                     elif stage3:
@@ -888,7 +902,7 @@ def lidar_data(veri_durak):
                         mahmut.adc4 = True
                         mahmut.adc5 = int(driving_mode)
                         
-                        if distances['on'] < 7.:
+                        if distances['on'] < 7.5:
                             stage3 = False
                             stage4 = True
                     elif stage4:
@@ -901,7 +915,7 @@ def lidar_data(veri_durak):
                         mahmut.adc4 = True
                         mahmut.adc5 = int(driving_mode)
 
-                        if distances['on'] < 1.5:
+                        if distances['on'] < 2.:
                             while True:
                                 mahmut.adc0 = DURMAK
                                 mahmut.adc1 = 1800
@@ -913,7 +927,6 @@ def lidar_data(veri_durak):
                                 print("DURDUM \m/!")
                                 time.sleep(1/20)
 
-                    arduino.publish(mahmut)
 
             # anciecnt park koordinatı bilinen kod
             elif 0:
@@ -1273,6 +1286,17 @@ def yolo_callback(data):
     global sol_array
     global right_array
     global hazreticounter
+    global park_left_not_started
+    global park_coordinate
+    global stage1
+    global stage2
+    global stage3
+    global stage4
+
+    global durak_hanzonun_yardımcısı
+    global mahmutapozisyonçeşitliliği
+    global yesil_gorundu
+    global kirmizi_distance
 
     sola_donulmez_goruldu = False
     saga_donulmez_goruldu = False
@@ -1292,20 +1316,22 @@ def yolo_callback(data):
             label, _, _, _, distance = tabela.split(',')
             distance = float(distance)
 
-            if label == "kirmizi isik" and float(distance) < 8. and float(distance) > 4. and AUTONOMOUS:
+            if label == "kirmizi isik" and float(distance) < 7. and float(distance) > 4. and AUTONOMOUS:
+                kirmizi_distance = distance
                 kirmizi_hattori = True
-                print("kirmizi hattori:", distance)
+                yesil_gorundu = False
+            elif label == "yesil isik":
+                yesil_gorundu = True
+                kirmizi_hattori = False
+                kirmizida_dur_lan = False
             elif label == "Durak" and float(distance) < 5.31 and float(distance) > 2 and not recently_stopped and AUTONOMOUS:
                 durak_hanzo = True
-                print("durak girdi")
-            elif label == "Park Yasak" and distance < 10.:
+            elif label == "Park Yasak" and distance < 11.:
                 hazreticounter += 1
             elif label == "Park Yasak" and distance < 15:
                 left_tracking = True
                 mid_tracking = False
                 right_tracking = False
-                roswtf = False
-                kirmizida_dur_lan = False
 
 
         if kirmizi_hattori:
@@ -1319,8 +1345,8 @@ def yolo_callback(data):
             roswtf = True
             recently_stopped = True
             durak_dik_start = [zed_x, zed_z]
-            return      
-            
+            return
+
         sola_donulmez_goruldu = False
         saga_donulmez_goruldu = False
         girilmez_goruldu = False
@@ -1331,9 +1357,9 @@ def yolo_callback(data):
             mid_tracking = False
             left_tracking = False
             right_tracking = False
-            kirmizida_dur_lan = False
             roswtf = False
             is_parking_mode = True
+
 
         for tabela in datas:
             label, x, y, z, distance = tabela.split(',')
@@ -1349,7 +1375,7 @@ def yolo_callback(data):
             ###################################################################################################
             ##################################################################################################            
             if label == "yesil isik":
-                kirmizida_dur_lan = False
+                yesil_gorundu = True
             elif label == "Park Yeri":
                 pass
                 #@ZED değiştirilecek !!!!
@@ -1364,31 +1390,31 @@ def yolo_callback(data):
             ###################################################################################################
             ###################################################################################################
             ###################################################################################################
-            elif label == "sola donulmez" and distance < 6.5 and distance > 3.5:
+            elif label == "sola donulmez" and distance < 6. and distance > 3.5:
                 sola_donulmez_goruldu = True
                 print("amcık")
-            elif label == "saga donulmez" and distance < 6.5 and distance > 3.5:
+            elif label == "saga donulmez" and distance < 6. and distance > 3.5:
                 saga_donulmez_goruldu = True
             elif label == "Girilmez" and distance < 5. and distance > 3.5:
                 girilmez_goruldu = False
             ####################################################################################
-            elif label == "ileriden sola mecburi yon" and distance < 6.5 and distance > 3.5:
+            elif label == "ileriden sola mecburi yon" and distance < 6. and distance > 3.5:
                 left_tracking = True
                 right_tracking = False
                 mid_tracking = False
                 r_u_sure = True
-            elif label == "ileriden saga mecburi yon" and distance < 6.5 and distance > 3.5:
+            elif label == "ileriden saga mecburi yon" and distance < 6. and distance > 3.5:
                 left_tracking = False
                 right_tracking = True
                 mid_tracking = False
                 r_u_sure = True
             ####################################################################################
-            elif label == "ileri Ve saga mecburi yon" and distance < 6.5 and distance > 3.5:
+            elif label == "ileri Ve saga mecburi yon" and distance < 6. and distance > 3.5:
                 left_tracking = False
                 right_tracking = True
                 mid_tracking = False
                 r_u_sure = True
-            elif label == "ileri Ve sola mecburi yon" and distance < 6.5 and distance > 3.5:
+            elif label == "ileri Ve sola mecburi yon" and distance < 6. and distance > 3.5:
                 right_tracking = False
                 left_tracking = True
                 mid_tracking = False
@@ -1458,6 +1484,7 @@ def yolo_callback(data):
                 left_tracking = True
                 right_tracking = False
             """
+    
                 
 def park_coordinate_callback(park_data):
     global park_coordinate
@@ -1553,6 +1580,11 @@ def fast_pp(right_point_distance, left_point_distance, bicycle_length = BICYCLE_
 
 if __name__ == "__main__":
     # this node #
+    if len(sys.argv) == 2:
+        sekorakı = int(sys.argv[1])
+    else:
+        sekorakı=1            
+
     rospy.init_node('mahmut',anonymous=True)
 
     # saving data
@@ -1602,4 +1634,3 @@ if __name__ == "__main__":
         rospy.spin()
 
     file.close()
-
