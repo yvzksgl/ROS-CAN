@@ -209,7 +209,7 @@ void RosCallback(const rosserial_arduino::Adc &mahmut){
     is_braking = int32_t(mahmut.adc2) / 10000;
 
     recep_tayyip_ercetin.data_u16[0] = brake_speed;
-    recep_tayyip_ercetin.data_u8[2] = is_braking;
+    recep_tayyip_ercetin.data_u8[2] = ! is_braking;
     
     /***************************************************/
 
