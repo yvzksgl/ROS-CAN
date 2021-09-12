@@ -140,7 +140,7 @@ if os.name == "nt":
             log.warning("Environment variables indicated a CPU run, but we didn't find `" +
                         winNoGPUdll+"`. Trying a GPU run anyway.")
 else:
-    lib = CDLL("/home/otonom/otonom_ws/src/zed_package/src/zed-yolo/libdarknet/libdarknet.so", RTLD_GLOBAL)
+    lib = CDLL("/home/ismet/otonom_ws/src/zed_package/src/zed-yolo/libdarknet/libdarknet.so", RTLD_GLOBAL)
 lib.network_width.argtypes = [c_void_p]
 lib.network_width.restype = c_int
 lib.network_height.argtypes = [c_void_p]
@@ -280,7 +280,7 @@ metaMain = None
 altNames = None
 
 
-def get_object_depth(depth, bounds):
+def get_object_depth(depth, bounds, label):
     '''
     Calculates the median x, y, z position of top slice(area_div) of point cloud
     in camera frame.
@@ -295,16 +295,15 @@ def get_object_depth(depth, bounds):
     Return:
         x, y, z: Location of object in meters.
     '''
-    area_div = 10
 
-    x_vect = []
-    y_vect = []
-    z_vect = []
-    if(int(bounds[0]) > 1700 or int(bounds[0]) < 220 or int(bounds[1]) > 960 or int(bounds[1]) < 121):
-        x_median = -1
-        y_median = -1
-        z_median = -1
-    else:
+
+    if(label == "Park Yeri"):
+        area_div = 2
+
+        x_vect = []
+        y_vect = []
+        z_vect = []
+
         for j in range(int(bounds[0] - area_div), int(bounds[0] + area_div)):
             for i in range(int(bounds[1] - area_div), int(bounds[1] + area_div)):
                 z = depth[i, j, 2]
@@ -312,15 +311,43 @@ def get_object_depth(depth, bounds):
                     x_vect.append(depth[i, j, 0])
                     y_vect.append(depth[i, j, 1])
                     z_vect.append(z)
-    try:
-        x_median = statistics.median(x_vect)
-        y_median = statistics.median(y_vect)
-        z_median = statistics.median(z_vect)
-    except Exception:
-        x_median = -1
-        y_median = -1
-        z_median = -1
-        pass
+        try:
+            x_median = statistics.median(x_vect)
+            y_median = statistics.median(y_vect)
+            z_median = statistics.median(z_vect)
+        except Exception:
+            x_median = -1
+            y_median = -1
+            z_median = -1
+            pass
+
+    else:
+        area_div = 10
+
+        x_vect = []
+        y_vect = []
+        z_vect = []
+        if(int(bounds[0]) > 1700 or int(bounds[0]) < 220 or int(bounds[1]) > 960 or int(bounds[1]) < 121):
+            x_median = -1
+            y_median = -1
+            z_median = -1
+        else:
+            for j in range(int(bounds[0] - area_div), int(bounds[0] + area_div)):
+                for i in range(int(bounds[1] - area_div), int(bounds[1] + area_div)):
+                    z = depth[i, j, 2]
+                    if not np.isnan(z) and not np.isinf(z):
+                        x_vect.append(depth[i, j, 0])
+                        y_vect.append(depth[i, j, 1])
+                        z_vect.append(z)
+        try:
+            x_median = statistics.median(x_vect)
+            y_median = statistics.median(y_vect)
+            z_median = statistics.median(z_vect)
+        except Exception:
+            x_median = -1
+            y_median = -1
+            z_median = -1
+            pass
 
     return x_median, y_median, z_median
 
@@ -335,10 +362,10 @@ color_array = 0
 
 
 
-left_right_model = joblib.load('/home/otonom/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/hattori.npy')
-park_durak_model = joblib.load('/home/otonom/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/durak_park.npy')
-traffic_light_model = load_model('/home/otonom/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/traffic_light_model.h5')
-must_lr_model = joblib.load('/home/otonom/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/must_r_l.npy')
+left_right_model = joblib.load('/home/ismet/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/hattori.npy')
+park_durak_model = joblib.load('/home/ismet/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/durak_park.npy')
+traffic_light_model = load_model('/home/ismet/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/traffic_light_model.h5')
+must_lr_model = joblib.load('/home/ismet/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/must_r_l.npy')
 
 
 orientations = 9
@@ -435,10 +462,11 @@ def main():
     global zed_pose
     global zed_sensors
 
-    darknet_path ="/home/otonom/otonom_ws/src/zed_package/src/zed-yolo/libdarknet/"
-    config_path = "/home/otonom/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/ismet_yolov3_v2.cfg"
-    weight_path = "/home/otonom/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/ismet_yolov3_v2_best_900.weights"
-    meta_path = "/home/otonom/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/coco.data"
+    darknet_path="/home/ismet/otonom_ws/src/zed_package/src/zed-yolo/libdarknet/"
+    config_path = "/home/ismet/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/ismet_yolov3_v2.cfg"
+    weight_path = "/home/ismet/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/ismet_yolov3_v2_10000.weights"
+    meta_path = "/home/ismet/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/coco.data"
+
     svo_path = None
     zed_id = 0
 
@@ -666,7 +694,7 @@ def SEBASTIAN_VETTEL():
                 #boundingBox = [[x_coord, y_coord], [x_coord, y_coord + y_extent], [x_coord + x_extent, y_coord + y_extent], [x_coord + x_extent, y_coord]]
                 thickness = 1
 
-                x, y, z = get_object_depth(depth, bounds)
+                x, y, z = get_object_depth(depth, bounds, label)
 
 
                 if((label=='sola donulmez') or (label=='saga donulmez')):
