@@ -357,7 +357,7 @@ cam = sl.Camera()
 runtime = sl.RuntimeParameters()
 mat = sl.Mat()
 point_cloud_mat = sl.Mat()
-thresh = 0.25
+thresh = 0.6
 color_array = 0
 
 
@@ -371,7 +371,7 @@ must_lr_model = joblib.load('/home/ismet/otonom_ws/src/zed_package/src/zed-yolo/
 orientations = 9
 pixels_per_cell = (8, 8)
 cells_per_block = (2, 2)
-threshold = .3
+threshold = .6
 runtime = 0
 zed_pose = 0
 
