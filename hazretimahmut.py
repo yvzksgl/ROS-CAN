@@ -11,6 +11,7 @@ import os
 import sys
 import csv
 import math
+from threading import main_thread
 import time
 import rospy
 import numba
@@ -50,11 +51,11 @@ POT_CENTER = 1800
 MAX_RPM_MODE_SPEED = 200
 RPM_MODE = 1
 CURRENT_MODE = 0
-driving_mode = RPM_MODE
+driving_mode = CURRENT_MODE
 DORU = (1 == 1)
 
-left_tracking = 1
-right_tracking = 0
+left_tracking = 0
+right_tracking = 1
 mid_tracking = 0
 
 NEUTRAL = 0
@@ -461,6 +462,7 @@ def lidar_data(veri_durak):
     
     #sol_laser[sol_laser>25] = 25
     #sag_laser[sag_laser>25] = 25
+        
 
 
     if ahaburasıdaboşmuşıheahıeah:
@@ -574,6 +576,8 @@ def lidar_data(veri_durak):
 
     sol_array[sol_array > 5] = 5
     right_array[right_array > 5] = 5
+    on_array[on_array > 25] = 25
+    
 
     distances = {
         'right': np.average(right_array),
@@ -809,7 +813,7 @@ def lidar_data(veri_durak):
                 # first left track, düzgün park distance sonrası two_third/mid tracking
                 elif 1:
                     #stagei buradan kaldır ya da adını degistir xd
-                    if stage1:
+                    if stage1 and sekorakı:
                         print(bcolors.FAIL+"ONEMLİ BURAYA GİRİYOR MU 1, sollu"+bcolors.ENDC)
                         right_point_distance = np.average(right_array)
                         left_point_distance = np.average(sol_array)
