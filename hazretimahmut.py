@@ -11,20 +11,19 @@ import os
 import sys
 import csv
 import math
-from threading import main_thread
 import time
 import rospy
 import numba
 import seaborn
 import numpy as np
-from numba import float32 as f32
-from  matplotlib import pyplot as plt
-from  rosserial_arduino.msg import Adc
-from  std_msgs.msg import String
-from  itertools import cycle
-from  sensor_msgs.msg import LaserScan, Joy
-from  numpy.lib.function_base import average
-from  geometry_msgs.msg import Point
+from   numba import float32 as f32
+from   matplotlib import pyplot as plt
+from   rosserial_arduino.msg import Adc
+from   std_msgs.msg import String
+from   itertools import cycle
+from   sensor_msgs.msg import LaserScan, Joy
+from   numpy.lib.function_base import average
+from   geometry_msgs.msg import Point
 #from  pynput.keyboard import Key, Listener
 
 np.seterr('raise')
@@ -45,18 +44,21 @@ collecting_data = False
 SOL = 0
 ORTA = 1
 SAG = 2 
-AUTONOMOUS_SPEED = 42 # never change this variable randomly!!!
+AUTONOMOUS_SPEED = 39 # never change this variable randomly!!!
 AUTONOMOUS_SPEED_RECOVERY = AUTONOMOUS_SPEED
 POT_CENTER = 1800
 MAX_RPM_MODE_SPEED = 200
 RPM_MODE = 1
 CURRENT_MODE = 0
-driving_mode = CURRENT_MODE
+driving_mode = RPM_MODE
 DORU = (1 == 1)
 
 left_tracking = 0
 right_tracking = 1
 mid_tracking = 0
+
+girildim_counter = 0
+girildim_bool = True
 
 NEUTRAL = 0
 FORWARD = 1
@@ -184,6 +186,8 @@ ACKERMAN_RADIUS = 4
 LABEL_OFFSET = 9.
 ERROR_ACCEPTANCE = .3
 
+karsiya_geciyorum = False
+
 DIKEY = 0 # 0->(dikey / x)
 YATAY = 1 # 1->(yatay / y)
 twothird = 1400
@@ -209,6 +213,33 @@ def potingen_straße(desired, difference):
 @numba.jit(f32(f32, f32, f32, f32, f32, f32), nopython=True, fastmath=True, cache=True)
 def fast_pid(p_error, Kp, i_error, Ki, d_error, Kd):
     return (p_error * Kp) + (i_error * Ki) + (d_error * Kd)
+
+@numba.jit(nopython=True, fastmath=True, cache=True)
+def fast_pp(right_point_distance, left_point_distance, bicycle_length = BICYCLE_LENGTH):
+    if(right_point_distance > 5):
+        right_point_distance = 5
+
+    if(left_point_distance > 5):
+        left_point_distance = 5
+
+    hipotenus = math.sqrt(math.pow(right_point_distance,2) + math.pow(left_point_distance,2))
+    lookahead_distance = hipotenus / 2
+    theta = math.degrees(math.atan(right_point_distance / left_point_distance))
+    target_direction_angle = 90 - (2 * theta)
+
+    formula = (2 * bicycle_length * math.sin(math.radians(target_direction_angle))) / lookahead_distance
+    return math.degrees(math.atan(formula)) / 180
+
+@numba.jit(nopython=True, fastmath=True, cache=True)
+def fast_pp2(right_point_distance, left_point_distance, bicycle_length = BICYCLE_LENGTH):
+    hipotenus = math.sqrt(math.pow(right_point_distance,2) + math.pow(left_point_distance,2))
+    lookahead_distance = hipotenus / 2
+    theta = math.degrees(math.atan(right_point_distance / left_point_distance))
+    target_direction_angle = 90 - (2 * theta)
+
+    formula = (2 * bicycle_length * math.sin(math.radians(target_direction_angle))) / lookahead_distance
+    return math.degrees(math.atan(formula)) / 180
+
 
 def control_mahmut(data):
     # speed
@@ -258,9 +289,7 @@ class Steering_Algorithms:
             print("teta: {:.2f}".format(self.teta))
             return self.teta
 
-    ##
-    #  BASE
-    # 
+
     class Pure_Pursuit_Controller():
         def __init__(self, bicycle_length, lookahead_distance, target_direction_angle):
             self.bicycle_length = bicycle_length
@@ -304,7 +333,8 @@ class Steering_Algorithms:
 
 #####################################################################################################################
 """
-    Stay Away
+    @future
+    Requires positional knowledge
 """
 class park_seko(object):
     def __init__(self, ackermann_radius, label_offset, error_acceptance = 0.5):
@@ -329,6 +359,9 @@ class park_seko(object):
             self.__destiny = True
 
 
+"""
+    Deprecated
+"""
 class serhatos(object):
     def __init__(self):
         self.coefficents = []
@@ -381,6 +414,8 @@ class serhatos(object):
         return distance
 #####################################################################################################################
 
+düz_gitmek = True
+mid_start = np.array([.0, .0, .0], dtype=np.float32)
 
 # main function #
 def lidar_data(veri_durak):
@@ -457,18 +492,26 @@ def lidar_data(veri_durak):
     global yesil_gorundu
     global kirmizi_distance
 
+    global mid_start # array
+    global düz_gitmek # bool
+
+    global girildim_counter
+    global girildim_bool
+
+    global karsiya_geciyorum
+
     #sol_laser = np.array(veri_durak.ranges[0:369], dtype=np.float32)
     #sag_laser = np.array(veri_durak.ranges[1079:1439], dtype=np.float32)
     
     #sol_laser[sol_laser>25] = 25
     #sag_laser[sag_laser>25] = 25
-        
 
+    print("trackings:", left_tracking, mid_tracking, right_tracking)
 
     if ahaburasıdaboşmuşıheahıeah:
         pass
         # TUNE ET
-        """ 
+        """
         while olceriz_sıkıntı_yog + 3 > time.time():
             mahmut.adc0 = AUTONOMOUS_SPEED
             mahmut.adc1 = 1800
@@ -477,8 +520,8 @@ def lidar_data(veri_durak):
             mahmut.adc4 = True
             mahmut.adc5 = driving_mode 
         """
-        """ while olceriz_sıkıntı_yog + 4 > time.time():
-            print("ahaburasıdaboşmuşıheahıeahahaburasıdaboşmuşıheahıeahahaburasıdaboşmuşıheahıeah")
+        while olceriz_sıkıntı_yog + 4 > time.time():
+            print("ahaburası da bosmus yav")
             zol = np.array(veri_durak.ranges[560:672])
             zag = np.array(veri_durak.ranges[224:336])
 
@@ -494,7 +537,7 @@ def lidar_data(veri_durak):
             mahmut.adc4 = True
             mahmut.adc5 = driving_mode
             time.sleep(1/20)
-            arduino.publish(mahmut) """
+            arduino.publish(mahmut)
         
         ahaburasıdaboşmuşıheahıeah = False
 
@@ -576,8 +619,6 @@ def lidar_data(veri_durak):
 
     sol_array[sol_array > 5] = 5
     right_array[right_array > 5] = 5
-    on_array[on_array > 25] = 25
-    
 
     distances = {
         'right': np.average(right_array),
@@ -589,6 +630,8 @@ def lidar_data(veri_durak):
     print(bcolors.WARNING + "park distance:" + bcolors.ENDC, park_distance)
     print(bcolors.WARNING + "park coord:   " + bcolors.ENDC, park_coordinate)
     
+    print("GIRILMEZ COUNTER", girildim_counter)
+
     if TERMINATOR:
         if AUTONOMOUS:
             print(bcolors.WARNING + "AUTONOMOUS" + bcolors.ENDC)
@@ -606,24 +649,37 @@ def lidar_data(veri_durak):
 
 
             elif mid_tracking == True:
+                if düz_gitmek:
+                    mid_start[0] = zed_x
+                    mid_start[1] = zed_y
+                    mid_start[2] = zed_z
+
+                    düz_gitmek = False
+
                 print(bcolors.FAIL + "MID_TRACKING" + bcolors.ENDC)
                 #
                 #   CHECK THE DIRECTION
 
                 #pürşit.target_finder(laser=veri_durak)
-                right_point_distance = np.average(right_array)
-                left_point_distance = np.average(sol_array)
 
-                if(right_point_distance > 5):
-                    right_point_distance = 5
+                mid_sol_array = np.array(veri_durak.ranges[399:435])
+                mid_sag_array = np.array(veri_durak.ranges[462:498])
 
-                if(left_point_distance > 5):
-                    left_point_distance = 5
 
-                print("r", right_point_distance)
-                print("l", left_point_distance)
-                steering = fast_pp(right_point_distance, left_point_distance)
-                print("steering angle:", steering)
+                right_point_distance = np.average(mid_sol_array)
+                left_point_distance = np.average(mid_sag_array)
+
+                if(right_point_distance > 25):
+                    right_point_distance = 25
+
+                if(left_point_distance > 25):
+                    left_point_distance = 25
+
+                print("right point distance", right_point_distance)
+                print("left point distance", left_point_distance)
+                
+                steering = fast_pp2(right_point_distance, left_point_distance)
+                print("steering:", steering)
 
                 #pid method
                 #steering = pid_controller.calculate(distances['left'] - distances['right'])
@@ -634,6 +690,7 @@ def lidar_data(veri_durak):
                     steering = .5
                 
                 angle = potingen_straße(steering, POT_CENTER-1800)
+                print("aci:", angle)
                 print("desired direction angle:", angle)
 
                 # doldur
@@ -643,6 +700,33 @@ def lidar_data(veri_durak):
                 mahmut.adc3 = FORWARD
                 mahmut.adc4 = True
                 mahmut.adc5 = int(RPM_MODE)
+
+                right_point_distance = np.average(right_array)
+                left_point_distance = np.average(sol_array)
+
+                anlık_fark = math.sqrt(math.pow(mid_start[0] - zed_x, 2) + math.pow(mid_start[2] - zed_z, 2))
+
+                print("ANLIKKKKK FARKKKK:::::", anlık_fark)
+                print("GIRLDIM BOOl", girildim_bool)
+
+                if right_point_distance < 3.0 and anlık_fark > 7:
+                    left_tracking = True
+                    mid_tracking = False
+                    right_tracking = False
+                    düz_gitmek = True
+                    print(bcolors.FAIL + "ARANIYORUM HER YERDE KIRMIZI BULTENLE" + bcolors.ENDC)
+                    girildim_bool = True
+                    girildim_counter += 1
+                    karsiya_geciyorum = False
+                elif left_point_distance < 3.0 and anlık_fark > 7:
+                    left_tracking = True
+                    mid_tracking = False
+                    right_tracking = False
+                    düz_gitmek = True
+                    print(bcolors.FAIL + "ARANIYORUM HER YERDE KIRMIZI BULTENLE" + bcolors.ENDC)
+                    girildim_bool = True
+                    girildim_counter += 1
+                    karsiya_geciyorum = False
             
             elif left_tracking == DORU:
                 print(bcolors.FAIL + "LEFT_TRACKING" + bcolors.ENDC)    #
@@ -813,7 +897,7 @@ def lidar_data(veri_durak):
                 # first left track, düzgün park distance sonrası two_third/mid tracking
                 elif 1:
                     #stagei buradan kaldır ya da adını degistir xd
-                    if stage1 and sekorakı:
+                    if stage1:
                         print(bcolors.FAIL+"ONEMLİ BURAYA GİRİYOR MU 1, sollu"+bcolors.ENDC)
                         right_point_distance = np.average(right_array)
                         left_point_distance = np.average(sol_array)
@@ -833,7 +917,7 @@ def lidar_data(veri_durak):
                         
                         angle = potingen_straße(steering, POT_CENTER-1800)
 
-                        if park_coordinate > 1700:
+                        if park_coordinate > 1500:
                             stage1 = False
 
                         # doldur
@@ -1313,9 +1397,17 @@ def yolo_callback(data):
     global yesil_gorundu
     global kirmizi_distance
 
+    global girildim_bool
+    global girildim_counter
+
     sola_donulmez_goruldu = False
     saga_donulmez_goruldu = False
     girilmez_goruldu = False
+
+    global karsiya_geciyorum
+
+    if karsiya_geciyorum:
+        return
 
     if data.data != "":
         datas = data.data.split(';')
@@ -1341,12 +1433,9 @@ def yolo_callback(data):
                 kirmizida_dur_lan = False
             elif label == "Durak" and float(distance) < 5.31 and float(distance) > 2 and not recently_stopped and AUTONOMOUS:
                 durak_hanzo = True
-            elif label == "Park Yasak" and distance < 11:
+            elif label == "Park Yasak" and distance < 9.3:
                 hazreticounter += 1
-            elif label == "Park Yasak" and distance < 11:
-                """ left_tracking = True
-                mid_tracking = False
-                right_tracking = False """
+
 
 
         if kirmizi_hattori:
@@ -1405,12 +1494,32 @@ def yolo_callback(data):
             ###################################################################################################
             ###################################################################################################
             ###################################################################################################
-            elif label == "sola donulmez" and distance < 6. and distance > 3.5:
+            elif label == "sola donulmez" and distance < 6.5 and distance > 3.5:
                 sola_donulmez_goruldu = True
-            elif label == "saga donulmez" and distance < 6. and distance > 3.5:
+            elif label == "saga donulmez" and distance < 6.5 and distance > 3.5:
                 saga_donulmez_goruldu = True
-            elif label == "Girilmez" and distance < 5. and distance > 4.5:
-                girilmez_goruldu = True
+            elif label == "Girilmez" and distance < 15 and distance > 3.5:
+                print("GİRİLDİM")
+                if girildim_bool:
+                    if girildim_counter == 0:
+                        left_tracking = True
+                        right_tracking = False
+                        mid_tracking = False
+                        girildim_bool = False
+                    elif girildim_counter == 1:
+                        left_tracking = False
+                        right_tracking = True
+                        mid_tracking = False
+                        girildim_bool = False
+                    elif girildim_counter == 2:
+                        left_tracking = True
+                        right_tracking = False
+                        mid_tracking = False
+                        girildim_bool = False
+                    
+                    
+
+                #girilmez_goruldu = True
             ####################################################################################
             elif label == "ileriden sola mecburi yon" and distance < 6. and distance > 3.5:
                 left_tracking = True
@@ -1438,9 +1547,12 @@ def yolo_callback(data):
                 pass
         
         if not r_u_sure:
-            if sola_donulmez_goruldu and saga_donulmez_goruldu:
-                olceriz_sıkıntı_yog = time.time()
-                ahaburasıdaboşmuşıheahıeah = True
+            if sola_donulmez_goruldu and saga_donulmez_goruldu:               
+                left_tracking = False
+                mid_tracking = True
+                right_tracking = False
+                karsiya_geciyorum = True
+
             elif sola_donulmez_goruldu:
                 left_tracking = False
                 mid_tracking = False
@@ -1449,21 +1561,8 @@ def yolo_callback(data):
                 left_tracking = True
                 mid_tracking = False
                 right_tracking = False
-            elif girilmez_goruldu:
-                sol_dist=average(sol_array)
-                right_dist=average(right_array)
-                if sol_dist > right_dist:
-                    left_tracking = True
-                    mid_tracking = False
-                    right_tracking = False
-                else:
-                    left_tracking = False
-                    mid_tracking = False
-                    right_tracking = True
-            else:
-                pass
-        
-        # OLD BUT GOLD     
+
+        # OLD BUT GOLD  ahaburasıdaboşmuşıheahıeahahaburasıdaboşmuşıheahıeahahaburasıdaboşmuşıheahıeah   
         """
         if r_u_sure:
             pass
@@ -1576,21 +1675,7 @@ def haydi_gel_icelim(data):
 </Ardu Odom>
 """
 
-@numba.jit(nopython=True, fastmath=True, cache=True)
-def fast_pp(right_point_distance, left_point_distance, bicycle_length = BICYCLE_LENGTH):
-    if(right_point_distance > 5):
-        right_point_distance = 5
 
-    if(left_point_distance > 5):
-        left_point_distance = 5
-
-    hipotenus = math.sqrt(math.pow(right_point_distance,2) + math.pow(left_point_distance,2))
-    lookahead_distance = hipotenus / 2
-    theta = math.degrees(math.atan(right_point_distance / left_point_distance))
-    target_direction_angle = 90 - (2 * theta)
-
-    formula = (2 * bicycle_length * math.sin(math.radians(target_direction_angle))) / lookahead_distance
-    return math.degrees(math.atan(formula)) / 180
 
 if __name__ == "__main__":
     # this node #

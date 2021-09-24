@@ -1,3 +1,12 @@
+#!/usr/bin/env python3
+# -*- coding: UTF-8 -*-
+
+#/*
+#    @year:        2020/2021
+#    @author:      Sekomer
+#    @touch:       aksoz19@itu.edu.tr
+#*/
+
 import numpy as np
 import math
 import cv2

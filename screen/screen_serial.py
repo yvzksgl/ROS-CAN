@@ -1,6 +1,12 @@
 #!/usr/bin/python
 # -*- coding: <utf-8> -*-
 
+#/*
+#    @year:        2020/2021
+#    @author:      Sekomer
+#    @touch:       aksoz19@itu.edu.tr
+#*/
+
 import serial
 import rospy
 from sensor_msgs.msg import LaserScan
@@ -27,8 +33,8 @@ def callback(data):
 	auto  = str(data.adc4)
 	#extra = "0"
 	
-	pompa = speed + steer + regen + gear + auto + "*"
-	arduino.write(bytes(pompa, "utf-8"))
+	yolla = speed + steer + regen + gear + auto + "*"
+	arduino.write(bytes(yolla, "utf-8"))
 	rospy.sleep(0.1)
     
     

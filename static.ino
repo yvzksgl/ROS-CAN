@@ -1,4 +1,4 @@
- /*
+/*
     @year:        2020/2021
     @author:      Sekomer
     @touch:       aksoz19@itu.edu.tr
@@ -133,7 +133,7 @@ static rosserial_arduino::Adc pot_data;
 /*
 *     ROS CALLBACK  
 */
-static int32_t cetin;
+static int32_t __steer;
 bool _debug = 0;
 
 void RosCallback(const rosserial_arduino::Adc &mahmut){
@@ -239,11 +239,11 @@ void RosCallback(const rosserial_arduino::Adc &mahmut){
         steer_speed = max_steer_speed;
     */
 
-    cetin = abs(change_value);
-    if (cetin > 1800)
-      cetin = 1800;
+    __steer = abs(change_value);
+    if (__steer > 1800)
+      __steer = 1800;
       
-    steer_speed = map(cetin, 0, 1800, min_steer_speed, max_steer_speed);
+    steer_speed = map(__steer, 0, 1800, min_steer_speed, max_steer_speed);
     
     /*
         @steering_obj.data_u16[0]  => steering speed
@@ -395,7 +395,6 @@ CAN_INIT:
     } 
     else {
         goto CAN_INIT;
-        Serial.println(31);
     }
 
     /* safety */
@@ -476,9 +475,9 @@ void loop(){
     
     /******************** Debug Topic ******************/ 
     /* rpm */
-    pot_data.adc0 = 3131;
+    pot_data.adc0 = pot_odom;
     /* steer */
-    pot_data.adc1 = pot_odom;
+    pot_data.adc1 = battery_odom.data[1];
     /* bus voltage / bus current */
     pot_data.adc2 = battery_odom.data[0];
     pot_data.adc3 = is_braking;

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 #DJ HAKAN KELES STYLE
+
+
 import os
 import sys
 import time
@@ -26,8 +28,6 @@ from nav_msgs.msg import Odometry
 from std_msgs.msg import String
 from keras.models import load_model
 from cv_bridge import CvBridge, CvBridgeError
-
-
 
 
 # Get the top-level logger object
@@ -352,14 +352,12 @@ def get_object_depth(depth, bounds, label):
     return x_median, y_median, z_median
 
 
-
 cam = sl.Camera()
 runtime = sl.RuntimeParameters()
 mat = sl.Mat()
 point_cloud_mat = sl.Mat()
 thresh = 0.6
 color_array = 0
-
 
 
 left_right_model = joblib.load('/home/ismet/otonom_ws/src/zed_package/src/zed-yolo/zed_python_sample/yolo_data/hattori.npy')
@@ -448,7 +446,6 @@ def must_left_right_judgement(img, x_min,x_max,y_min,y_max):
     fd = fd.reshape(1,8100)
     sonuc = must_lr_model.predict(fd)
     return sonuc
-
 
 
 def main():
@@ -618,8 +615,6 @@ YESIL_ISIK = "yesil isik"
 YESIL_ISIK_CTR = 0
 
 
-
-
 def SEBASTIAN_VETTEL():
     global x_orta
     global y_orta
@@ -654,11 +649,8 @@ def SEBASTIAN_VETTEL():
     global YESIL_ISIK_CTR
 
 
-
     LIMIT = 3
-
     SANIYE = 7
-
     states = ['red', 'yellow', 'green', 'off']
 
     label = '' 
@@ -1050,7 +1042,6 @@ def isik_testi(data):
     return detected_objects
 
 
-
 main()
 file = open("mahmut_sikildi.txt", "a")
 rospy.init_node("zed_node",anonymous=True)
@@ -1065,23 +1056,16 @@ park_yeri_distance_pub = rospy.Publisher('yolo_park_distance',String, queue_size
 
 
 image_msgs = Image()
-
 pose_msg = Point()
-
 sign_coord = Point()
-
 odometry_msg = Odometry()
-
 odometry_msg.child_frame_id = "base_link"
-  
 bridge = CvBridge()
 
 while not rospy.is_shutdown():
-    
     image, label_and_distance, sign_coord, detected_objects, park_yeri_pixel, park_yeri_uzaklik = SEBASTIAN_VETTEL()
     detected_objects = isik_testi(detected_objects)
     pose_msg, odometry_msg = SAINZ()
-    
     image_message = bridge.cv2_to_imgmsg(image, "passthrough")
     park_yeri_pub.publish(str(park_yeri_pixel))
     park_yeri_distance_pub.publish(str(park_yeri_uzaklik))

@@ -1,4 +1,8 @@
-/* BİLMİYORSAN ELLEME XD */
+/*
+    @year:        2020/2021
+    @author:      Sekomer
+    @touch:       aksoz19@itu.edu.tr
+*/
 
 #include "ros.h"
 #include "LiquidCrystal_I2C.h"
