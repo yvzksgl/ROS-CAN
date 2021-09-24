@@ -574,7 +574,7 @@ def lidar_data(veri_durak):
             mahmutapozisyonçeşitliliği[2] = zed_z
             igotthepose = True
 
-        print("duraktan beri gittiğim yolu s2m: ", math.sqrt(math.pow(mahmutapozisyonçeşitliliği[0] - zed_x, 2) + math.pow(mahmutapozisyonçeşitliliği[2] - zed_z, 2)))
+        print("duraktan beri gittiğim yol: ", math.sqrt(math.pow(mahmutapozisyonçeşitliliği[0] - zed_x, 2) + math.pow(mahmutapozisyonçeşitliliği[2] - zed_z, 2)))
         # pose difference
         if math.sqrt(math.pow(mahmutapozisyonçeşitliliği[0] - zed_x, 2) + math.pow(mahmutapozisyonçeşitliliği[2] - zed_z, 2)) > 3.5:
             while time.time() < start + YOLCU:
