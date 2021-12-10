@@ -3,7 +3,7 @@
 
 #/*
 #    @year:        2020/2021
-#    @author:      Sekomer
+#    @authors:     Sekomer, ubuntumevuz
 #    @touch:       aksoz19@itu.edu.tr
 #*/
 
@@ -929,7 +929,7 @@ def lidar_data(veri_durak):
                         mahmut.adc5 = int(driving_mode)
                     else:
                         print("stage1 in else kısmı")
-                        if park_distance > 6.1 and sekorakı: #yaviz
+                        if park_distance > 6.1 and yavizseko: #yaviz
                             print("TWO THIRD PARK")
                             target_diff = (twothird - park_coordinate) / 1700
                             steer = (target_diff + 0.5) * 3600
@@ -961,7 +961,7 @@ def lidar_data(veri_durak):
                             mahmut.adc3 = FORWARD
                             mahmut.adc4 = True
                             mahmut.adc5 = int(driving_mode)
-                            print(bcolors.FAIL+"YAVASLAMAK 31313131 \m/!"+bcolors.ENDC)
+                            print(bcolors.FAIL+"YAVASLAMAK \m/!"+bcolors.ENDC)
 
 
 
@@ -1680,9 +1680,9 @@ def haydi_gel_icelim(data):
 if __name__ == "__main__":
     # this node #
     if len(sys.argv) == 2:
-        sekorakı = int(sys.argv[1])
+        yavizseko = int(sys.argv[1])
     else:
-        sekorakı=1            
+        yavizseko=1            
 
     rospy.init_node('mahmut',anonymous=True)
 
