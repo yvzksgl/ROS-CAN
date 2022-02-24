@@ -5,6 +5,7 @@
 #    @year:        2020/2021
 #    @authors:     Sekomer, ubuntumevuz
 #    @touch:       aksoz19@itu.edu.tr
+#    @touch:       koseoglumu18@itu.edu.tr
 #*/
 
 import os
